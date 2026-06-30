@@ -135,6 +135,33 @@ class DataCollatorCTCWithPadding:
         return batch
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Train Wav2Vec2 on local or remote machine.")
+    parser.add_argument("--train-csv", type=str, default=CONFIG["train_csv"], help="Path to training CSV split.")
+    parser.add_argument("--valid-csv", type=str, default=CONFIG["valid_csv"], help="Path to validation CSV split.")
+    parser.add_argument("--test-csv", type=str, default=CONFIG["test_csv"], help="Path to test CSV split.")
+    parser.add_argument("--audio-dir", type=str, default=CONFIG["audio_dir"], help="Directory containing audio files.")
+    parser.add_argument("--output-dir", type=str, default=CONFIG["output_dir"], help="Output directory for logs and models.")
+    parser.add_argument("--epochs", type=int, default=CONFIG["epochs"], help="Number of training epochs.")
+    parser.add_argument("--lmplz-path", type=str, default=CONFIG["lmplz_path"], help="Path to KenLM lmplz binary.")
+    parser.add_argument("--max-steps", type=int, default=CONFIG["max_steps"], help="Max training steps (-1 for unlimited).")
+    parser.add_argument("--push-to-hub", action="store_true", help="Push checkpoints to Hugging Face Hub.")
+    parser.add_argument("--hub-model-id", type=str, default=None, help="Hugging Face Hub model ID (e.g. username/model_name).")
+    parser.add_argument("--hub-token", type=str, default=None, help="Hugging Face Hub Authentication Token.")
+    args = parser.parse_args()
+
+    CONFIG["train_csv"] = args.train_csv
+    CONFIG["valid_csv"] = args.valid_csv
+    CONFIG["test_csv"] = args.test_csv
+    CONFIG["audio_dir"] = args.audio_dir
+    CONFIG["output_dir"] = args.output_dir
+    CONFIG["epochs"] = args.epochs
+    CONFIG["lmplz_path"] = args.lmplz_path
+    CONFIG["max_steps"] = args.max_steps
+    CONFIG["push_to_hub"] = args.push_to_hub
+    CONFIG["hub_model_id"] = args.hub_model_id
+    CONFIG["hub_token"] = args.hub_token
+
     # Paths and folders
     os.makedirs(CONFIG["output_dir"], exist_ok=True)
     folder_log_files = os.path.join(CONFIG["output_dir"], "logs-wav2vec2-res")
