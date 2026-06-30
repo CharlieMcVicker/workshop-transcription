@@ -373,7 +373,12 @@ def main():
 
     # Evaluate checkpoints with pyctcdecode
     print("Starting KenLM post-decoding evaluation of checkpoints...")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
 
     import glob
     ckpt_dirs = glob.glob(os.path.join(folder_model_files, "checkpoint-*"))
@@ -445,6 +450,8 @@ def main():
         del ckpt_model
         if device == "cuda":
             torch.cuda.empty_cache()
+        elif device == "mps":
+            torch.mps.empty_cache()
 
     ranking = []
     for ckpt_label, rows in rows_by_ckpt.items():
