@@ -32,11 +32,15 @@ This repository contains tools for processing audio transcription files and prep
 A virtual environment is managed locally via `uv` for lightning-fast package resolution.
 
 ### 1. Install Dependencies and Build KenLM
+
 Ensure you have `cmake` installed on your machine (`brew install cmake` on macOS). Then, run the installer:
+
 ```bash
 ./colab-script-rips/install_requirements.sh
 ```
+
 This script will:
+
 - Activate your local virtual environment (`.venv`).
 - Install pinning versions of PyTorch (`torchaudio`), Hugging Face `transformers` and `datasets`, evaluation utilities (`jiwer`, `evaluate`), and decoder toolsets.
 - Clone and compile KenLM locally at `colab-script-rips/kenlm/build/bin/lmplz`.
@@ -48,6 +52,7 @@ This script will:
 The main script is [local_csv_to_wav2vec2.py](file:///Users/charlesmcvicker/code/workshop-transcription/local_csv_to_wav2vec2.py). It bypasses Google Colab and Google Sheets, processing the dataset locally using the files in your workspace.
 
 ### Key Features
+
 - **Zero Dependencies**: Relies solely on Python's standard library (no `pandas` or `numpy` installation needed).
 - **Metadata Extraction**: Reads the WAV file headers directly to verify existence and extract durations and file sizes.
 - **Normalization**: Standardizes transcripts by removing punctuation/extra formatting (including asterisks `*`) and downcasing.
@@ -58,6 +63,7 @@ The main script is [local_csv_to_wav2vec2.py](file:///Users/charlesmcvicker/code
 ### Usage
 
 Run the script from the project root:
+
 ```bash
 ./local_csv_to_wav2vec2.py [options]
 ```
@@ -94,6 +100,7 @@ options:
 The script [trainer_w2v2_local.py](file:///Users/charlesmcvicker/code/workshop-transcription/colab-script-rips/trainer_w2v2_local.py) allows offline, local training of the speech-to-text pipeline.
 
 ### Steps Undertaken in Training
+
 1. **Pre-processing**: Reads the local train, validation, and test CSV files.
 2. **Vocabulary Building**: Analyzes character frequency across the dataset and writes `vocab.json`.
 3. **Language Modeling**: Feeds the dataset transcripts into `lmplz` to generate a 4-gram ARPA language model. It corrects ARPA formatting so it is fully compatible with `pyctcdecode`.
@@ -104,16 +111,35 @@ The script [trainer_w2v2_local.py](file:///Users/charlesmcvicker/code/workshop-t
 ### Running the Trainer
 
 To run the training script:
+
 ```bash
 uv run python colab-script-rips/trainer_w2v2_local.py
 ```
-*Note for Apple Silicon Users:*
+
+_Note for Apple Silicon Users:_
 If you are using the default stable PyTorch release, the MPS backend does not natively support the `ctc_loss` operator, requiring you to enable CPU fallback:
+
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python colab-script-rips/trainer_w2v2_local.py
 ```
 
 However, if you have installed **PyTorch Nightly** (specifically version `2.14.0.dev20260630` or newer), native MPS acceleration is supported for CTC loss out-of-the-box, allowing you to run training fully on your GPU without the CPU fallback environment variable:
+
 ```bash
 uv run python colab-script-rips/trainer_w2v2_local.py
+```
+
+## What to run on VM
+
+```zsh
+  python3 /workspace/trainer_w2v2_local.py \
+      --train-csv /workspace/cim-wav2vec2-train.csv \
+      --valid-csv /workspace/cim-wav2vec2-valid.csv \
+      --test-csv /workspace/cim-wav2vec2-test.csv \
+      --audio-dir /workspace/sentence_audio \
+      --output-dir /workspace/output_w2v2 \
+      --lmplz-path lmplz \
+      --push-to-hub \
+      --hub-model-id "charliemcvicker/asr-cherokee" \
+      --hub-token "your_hf_write_token"
 ```
