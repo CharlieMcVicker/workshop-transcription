@@ -1,5 +1,9 @@
+# workshop files
 bribri-audio-files-asr-exercise/
 cim-audio-files-asr-exercise/
 elan installers/
+
+# cherokee audio data
+sentence_audio
 
 .DS_Store
