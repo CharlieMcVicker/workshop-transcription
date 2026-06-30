@@ -380,6 +380,10 @@ def main():
         greater_is_better=False,
         report_to="none",
         max_steps=CONFIG["max_steps"],
+        push_to_hub=CONFIG["push_to_hub"],
+        hub_model_id=CONFIG["hub_model_id"],
+        hub_token=CONFIG["hub_token"],
+        hub_private_repo=True,  # Keeps models private
     )
 
     data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
