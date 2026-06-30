@@ -107,9 +107,13 @@ To run the training script:
 ```bash
 uv run python colab-script-rips/trainer_w2v2_local.py
 ```
-
-*Note for Apple Silicon Users:* 
-PyTorch's MPS device does not natively support the `ctc_loss` operator. Set the CPU fallback environment variable to bypass this limitation:
+*Note for Apple Silicon Users:*
+If you are using the default stable PyTorch release, the MPS backend does not natively support the `ctc_loss` operator, requiring you to enable CPU fallback:
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python colab-script-rips/trainer_w2v2_local.py
+```
+
+However, if you have installed **PyTorch Nightly** (specifically version `2.14.0.dev20260630` or newer), native MPS acceleration is supported for CTC loss out-of-the-box, allowing you to run training fully on your GPU without the CPU fallback environment variable:
+```bash
+uv run python colab-script-rips/trainer_w2v2_local.py
 ```
