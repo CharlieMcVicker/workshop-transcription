@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 
@@ -65,11 +65,12 @@ function View0({ theme }) {
  const t = theme;
  const [files, setFiles] = useState([]);
  const [form, setForm] = useState({ audio_file: "", filename: "" });
+ const [settings, setSettings] = useState({ silence_thresh: -40, min_silence_len: 500, keep_silence: 100 });
  const [status, setStatus] = useState(null);
  const [loading, setLoading] = useState(false);
  const [ws, setWs] = useState(null);
  const [wsRegions, setWsRegions] = useState(null);
- const [zoom, setZoom] = useState(10);
+ const [zoom, setZoom] = useState(1);
  const containerRef = useRef(null);
 
  useEffect(() => {
@@ -124,44 +125,66 @@ function View0({ theme }) {
  // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [form.audio_file]);
 
- useEffect(() => {
- if (ws) {
- try {
- ws.zoom(Number(zoom));
- } catch (e) {
- // Audio not yet loaded, safe to ignore
- }
- }
- }, [zoom, ws]);
+  useEffect(() => {
+    if (ws) {
+      try {
+        const wrapper = ws.getWrapper();
+        const scrollLeft = wrapper.scrollLeft;
+        const width = wrapper.clientWidth;
+        const scrollWidth = wrapper.scrollWidth;
+        const centerRatio = scrollWidth > 0 ? (scrollLeft + width / 2) / scrollWidth : 0;
+        
+        ws.zoom(Number(zoom));
+        
+        // Wait for next tick to ensure DOM is updated after zoom
+        setTimeout(() => {
+          const newScrollWidth = wrapper.scrollWidth;
+          wrapper.scrollLeft = centerRatio * newScrollWidth - width / 2;
+        }, 0);
+      } catch (e) {
+        // Audio not yet loaded, safe to ignore
+      }
+    }
+  }, [zoom, ws]);
 
- const handleAutoDetect = async () => {
- setLoading(true);
- setStatus("Detecting speech regions... (This may take a minute)");
- try {
- const res = await fetch("http://localhost:8000/api/vad_segments", {
- method: "POST",
- headers: { "Content-Type": "application/json" },
- body: JSON.stringify({ filename: form.audio_file })
- });
- const data = await res.json();
- if (res.ok) {
- wsRegions.clearRegions();
- data.segments.forEach(seg => {
- wsRegions.addRegion({
- start: seg.start,
- end: seg.end,
- color: 'rgba(0, 255, 0, 0.1)'
- });
- });
- setStatus(`✅ Detected ${data.segments.length} regions.`);
- } else {
- setStatus(`❌ Error: ${data.detail}`);
- }
- } catch (e) {
- setStatus(`❌ Error: ${e.message}`);
- }
- setLoading(false);
- };
+ const fetchSegments = async (currentSettings) => {
+    if (!form.audio_file || !wsRegions) return;
+    setLoading(true);
+    setStatus("Detecting speech regions...");
+    try {
+      const res = await fetch("http://localhost:8000/api/julie_segments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: form.audio_file, ...currentSettings })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        wsRegions.clearRegions();
+        data.segments.forEach((seg, index) => {
+          wsRegions.addRegion({
+            start: seg.start,
+            end: seg.end,
+            color: index % 2 === 0 ? 'rgba(0, 200, 0, 0.2)' : 'rgba(0, 255, 0, 0.1)'
+          });
+        });
+        setStatus(`✅ Detected ${data.segments.length} regions.`);
+      } else {
+        setStatus(`❌ Error: ${data.detail}`);
+      }
+    } catch (e) {
+      setStatus(`❌ Error: ${e.message}`);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (wsRegions) {
+        fetchSegments(settings);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [settings, form.audio_file, wsRegions]);
 
  const handleExport = async () => {
  if (!wsRegions) return;
@@ -203,17 +226,21 @@ function View0({ theme }) {
  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Audio File</label>
- <select 
- className={`w-full p-3 ${t.input}`} 
- value={form.audio_file} 
- onChange={e => {
- setForm({...form, audio_file: e.target.value, filename: e.target.value.split('.')[0] + "-annotated.txt"});
- setStatus(null);
- }}
- >
- {files.length === 0 && <option>No files found</option>}
- {files.map(f => <option key={f} value={f}>{f}</option>)}
- </select>
+ {files.length === 0 ? (
+   <select className={`w-full p-3 ${t.input}`} disabled>
+     <option>No files found</option>
+   </select>
+ ) : (
+   <FileTreeSelector 
+     files={files} 
+     selectedFile={form.audio_file} 
+     onSelect={(f) => {
+       setForm({...form, audio_file: f, filename: f.split('/').pop().split('.')[0] + "-annotated.txt"});
+       setStatus(null);
+     }} 
+     theme={t} 
+   />
+ )}
  </div>
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Export Filename</label>
@@ -228,7 +255,7 @@ function View0({ theme }) {
  <label className={`text-sm font-medium ${t.label} whitespace-nowrap`}>Zoom:</label>
  <input 
  type="range" 
- min="10" 
+ min="1" 
  max="1000" 
  value={zoom} 
  onChange={(e) => setZoom(e.target.value)} 
@@ -259,18 +286,35 @@ function View0({ theme }) {
  </div>
  </div>
 
+ <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 border ${t.inputInfo}`}>
+   <div>
+     <label className={`block text-sm font-medium ${t.label} mb-2`}>Silence Threshold (dBFS)</label>
+     <div className="flex items-center gap-2">
+       <input type="range" min="-80" max="0" step="1" value={settings.silence_thresh} onChange={(e) => setSettings({...settings, silence_thresh: parseInt(e.target.value) || 0})} className="w-full" />
+       <input type="number" min="-80" max="0" value={settings.silence_thresh} onChange={(e) => setSettings({...settings, silence_thresh: parseInt(e.target.value) || 0})} className={`w-16 p-1 text-sm ${t.input} mb-0`} />
+     </div>
+   </div>
+   <div>
+     <label className={`block text-sm font-medium ${t.label} mb-2`}>Min Silence (ms)</label>
+     <div className="flex items-center gap-2">
+       <input type="range" min="10" max="300" step="1" value={settings.min_silence_len} onChange={(e) => setSettings({...settings, min_silence_len: parseInt(e.target.value) || 0})} className="w-full" />
+       <input type="number" min="10" max="300" value={settings.min_silence_len} onChange={(e) => setSettings({...settings, min_silence_len: parseInt(e.target.value) || 0})} className={`w-20 p-1 text-sm ${t.input} mb-0`} />
+     </div>
+   </div>
+   <div>
+     <label className={`block text-sm font-medium ${t.label} mb-2`}>Keep Silence (ms)</label>
+     <div className="flex items-center gap-2">
+       <input type="range" min="0" max="300" step="1" value={settings.keep_silence} onChange={(e) => setSettings({...settings, keep_silence: parseInt(e.target.value) || 0})} className="w-full" />
+       <input type="number" min="0" max="300" value={settings.keep_silence} onChange={(e) => setSettings({...settings, keep_silence: parseInt(e.target.value) || 0})} className={`w-20 p-1 text-sm ${t.input} mb-0`} />
+     </div>
+   </div>
+ </div>
+
  <div className="flex gap-4 mb-6">
- <button 
- onClick={handleAutoDetect} 
- disabled={loading || !form.audio_file}
- className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] ${t.buttonSecondary}`}
- >
- {loading ? "Processing..." : "Auto-Detect Regions"}
- </button>
  <button 
  onClick={handleExport} 
  disabled={loading || !form.filename}
- className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] ${t.buttonPrimary}`}
+ className={`w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] ${t.buttonPrimary}`}
  >
  Export to ELAN TXT
  </button>
@@ -338,17 +382,23 @@ function View1({ theme }) {
  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Annotation File (.txt)</label>
- <select className={`w-full p-3 ${t.input}`} value={txtFile} onChange={e => setTxtFile(e.target.value)}>
- {files.txt_files.length === 0 && <option>No files found</option>}
- {files.txt_files.map(f => <option key={f} value={f}>{f}</option>)}
- </select>
+ {files.txt_files.length === 0 ? (
+   <select className={`w-full p-3 ${t.input}`} disabled>
+     <option>No files found</option>
+   </select>
+ ) : (
+   <FileTreeSelector files={files.txt_files} selectedFile={txtFile} onSelect={setTxtFile} theme={t} />
+ )}
  </div>
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Source Audio (.wav)</label>
- <select className={`w-full p-3 ${t.input}`} value={wavFile} onChange={e => setWavFile(e.target.value)}>
- {files.wav_files.length === 0 && <option>No files found</option>}
- {files.wav_files.map(f => <option key={f} value={f}>{f}</option>)}
- </select>
+ {files.wav_files.length === 0 ? (
+   <select className={`w-full p-3 ${t.input}`} disabled>
+     <option>No files found</option>
+   </select>
+ ) : (
+   <FileTreeSelector files={files.wav_files} selectedFile={wavFile} onSelect={setWavFile} theme={t} />
+ )}
  </div>
  </div>
 
@@ -579,6 +629,63 @@ function View3({ theme }) {
  );
 }
 
+function FileTreeSelector({ files, selectedFile, onSelect, theme }) {
+  const tree = useMemo(() => {
+    const root = { name: "Root", children: {}, path: null, isFolder: true };
+    files.forEach(f => {
+      const parts = f.split('/');
+      let current = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!current.children[parts[i]]) {
+          current.children[parts[i]] = { name: parts[i], children: {}, path: null, isFolder: true };
+        }
+        current = current.children[parts[i]];
+      }
+      const fileName = parts[parts.length - 1];
+      current.children[fileName] = { name: fileName, children: null, path: f, isFolder: false };
+    });
+    return root;
+  }, [files]);
+
+  const [expanded, setExpanded] = useState({ Root: true });
+  const toggle = (path) => setExpanded(prev => ({...prev, [path]: !prev[path]}));
+
+  const renderNode = (node, pathKey = "") => {
+    if (!node.isFolder) {
+      const isSelected = selectedFile === node.path;
+      return (
+        <div key={node.path} 
+             onClick={() => onSelect(node.path)}
+             className={`cursor-pointer pl-6 py-2 px-2 -ml-2 text-sm ${isSelected ? 'bg-blue-100 text-blue-900 font-medium rounded' : 'hover:bg-gray-100 text-gray-700 rounded'}`}>
+          <span className="text-base mr-2">📄</span> {node.name}
+        </div>
+      );
+    } else {
+      const isExpanded = expanded[pathKey] !== false; // default true
+      return (
+        <div key={pathKey || 'root'} className="pl-4 mt-1">
+          <div className="cursor-pointer py-2 px-2 -ml-2 text-sm font-medium text-gray-800 hover:bg-gray-100 flex items-center rounded" 
+               onClick={() => toggle(pathKey)}>
+            <span className="w-6 h-6 flex items-center justify-center text-xs">{isExpanded ? '▼' : '▶'}</span>
+            <span className="ml-1 text-base mr-2">📁</span> {node.name}
+          </div>
+          {isExpanded && (
+            <div className="ml-3 border-l border-gray-200">
+              {Object.keys(node.children).sort().map(key => renderNode(node.children[key], pathKey ? pathKey + "/" + key : key))}
+            </div>
+          )}
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div className={`border rounded p-2 text-left bg-white overflow-y-auto max-h-60 ${theme.input}`}>
+      {Object.keys(tree.children).sort().map(key => renderNode(tree.children[key], key))}
+    </div>
+  );
+}
+
 function View4({ theme }) {
  const t = theme;
  const [files, setFiles] = useState([]);
@@ -586,6 +693,7 @@ function View4({ theme }) {
  const [form, setForm] = useState({ audio_file: "", checkpoint: "" });
  const [status, setStatus] = useState(null);
  const [loading, setLoading] = useState(false);
+ const [transcription, setTranscription] = useState("");
 
  useEffect(() => {
  fetch("http://localhost:8000/api/inference_files")
@@ -606,6 +714,7 @@ function View4({ theme }) {
  const handleTranscribe = async () => {
  setLoading(true);
  setStatus("Transcribing... This may take a while depending on file length.");
+ setTranscription("");
  try {
  const res = await fetch("http://localhost:8000/api/transcribe_long", {
  method: "POST",
@@ -615,6 +724,9 @@ function View4({ theme }) {
  const data = await res.json();
  if (res.ok) {
  setStatus(`✅ Success! TSV saved to ${data.tsv_file}`);
+ if (data.transcription) {
+    setTranscription(data.transcription);
+ }
  } else {
  setStatus(`❌ Error: ${data.detail}`);
  }
@@ -622,6 +734,10 @@ function View4({ theme }) {
  setStatus(`❌ Error: ${e.message}`);
  }
  setLoading(false);
+ };
+
+ const removeNumbers = (str) => {
+   return str.replace(/[0-9]/g, '');
  };
 
  return (
@@ -633,10 +749,13 @@ function View4({ theme }) {
  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Audio File</label>
- <select className={`w-full p-3 ${t.input}`} value={form.audio_file} onChange={e => setForm({...form, audio_file: e.target.value})}>
- {files.length === 0 && <option>No files found</option>}
- {files.map(f => <option key={f} value={f}>{f}</option>)}
- </select>
+ {files.length === 0 ? (
+   <select className={`w-full p-3 ${t.input}`} disabled>
+     <option>No files found</option>
+   </select>
+ ) : (
+   <FileTreeSelector files={files} selectedFile={form.audio_file} onSelect={(f) => setForm({...form, audio_file: f})} theme={t} />
+ )}
  </div>
  <div>
  <label className={`block text-sm font-medium ${t.label} mb-2`}>Model Checkpoint</label>
@@ -658,6 +777,15 @@ function View4({ theme }) {
  {status && (
  <div className={`mt-6 p-4 border ${status.includes('❌') ? t.errorMsg : t.successMsg}`}>
  {status}
+ </div>
+ )}
+
+ {transcription && (
+ <div className="mt-6 p-4 border rounded text-left bg-white shadow-sm">
+   <h3 className="font-bold mb-2 text-gray-800">Transcription (with tone)</h3>
+   <p className="mb-4 text-gray-700">{transcription}</p>
+   <h3 className="font-bold mb-2 text-gray-800">Transcription (without tone)</h3>
+   <p className="text-gray-700">{removeNumbers(transcription)}</p>
  </div>
  )}
  </div>

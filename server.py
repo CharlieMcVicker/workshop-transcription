@@ -103,9 +103,9 @@ def get_vad_model():
         )
     return vad_model
 
-@app.get("/api/audio/{filename}")
+@app.get("/api/audio/{filename:path}")
 def get_audio(filename: str):
-    path = os.path.join(AppConfig.SANDBOX_DIR, "audiofiles-to-transcribe", filename)
+    path = os.path.join(AppConfig.SANDBOX_DIR, filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(path)
@@ -116,7 +116,7 @@ class VADRequest(BaseModel):
 @app.post("/api/vad_segments")
 def get_vad_segments(req: VADRequest):
     try:
-        path = os.path.join(AppConfig.SANDBOX_DIR, "audiofiles-to-transcribe", req.filename)
+        path = os.path.join(AppConfig.SANDBOX_DIR, req.filename)
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Audio file not found")
             
@@ -142,6 +142,59 @@ def get_vad_segments(req: VADRequest):
         return {"segments": segments}
     except HTTPException:
         raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+class JulieVADRequest(BaseModel):
+    filename: str
+    silence_thresh: int = -40
+    min_silence_len: int = 500
+    keep_silence: int = 100
+
+audio_profile_cache = {}
+
+@app.post("/api/julie_segments")
+def get_julie_segments(req: JulieVADRequest):
+    try:
+        from julie.segment_audio import get_energy_profile, segment_audio_from_profile
+        from pydub import AudioSegment
+        
+        path = os.path.join(AppConfig.SANDBOX_DIR, req.filename)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Audio file not found")
+            
+        cache_key = req.filename
+        mtime = os.path.getmtime(path)
+        
+        if cache_key not in audio_profile_cache or audio_profile_cache[cache_key]['mtime'] != mtime:
+            print(f"Computing energy profile for {req.filename}...")
+            audio = AudioSegment.from_file(path)
+            total_len = len(audio)
+            dbfs_profile = get_energy_profile(audio, step_ms=10)
+            audio_profile_cache[cache_key] = {
+                'profile': dbfs_profile,
+                'total_len': total_len,
+                'mtime': mtime
+            }
+        
+        cached = audio_profile_cache[cache_key]
+        
+        segments = segment_audio_from_profile(
+            cached['profile'],
+            cached['total_len'],
+            step_ms=10,
+            min_silence_len=req.min_silence_len,
+            silence_thresh=req.silence_thresh,
+            keep_silence=req.keep_silence
+        )
+        
+        sec_segments = []
+        for seg in segments:
+            sec_segments.append({"start": round(seg['start'] / 1000.0, 3), "end": round(seg['end'] / 1000.0, 3)})
+            
+        return {"segments": sec_segments}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -174,27 +227,40 @@ def save_elan(req: SaveElanRequest):
 
 @app.get("/api/files")
 def get_files():
-    txt_files = [f for f in os.listdir(AppConfig.get_elan_dir()) if f.lower().endswith(".txt")]
-    
+    base_dir = AppConfig.SANDBOX_DIR
+    txt_files = []
     wav_files = []
-    if os.path.exists(AppConfig.get_elan_dir()):
-        wav_files.extend([f for f in os.listdir(AppConfig.get_elan_dir()) if f.lower().endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus"))])
+    if not os.path.exists(base_dir):
+        return {"txt_files": [], "wav_files": []}
         
-    inf_dir = AppConfig.get_inf_dir()
-    if os.path.exists(inf_dir):
-        wav_files.extend([f for f in os.listdir(inf_dir) if f.lower().endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus"))])
-        
-    wav_files = list(set(wav_files))
-    
+    for root, dirs, files in os.walk(base_dir):
+        if any(ignore in root for ignore in ["venv", "node_modules", ".git"]):
+            continue
+        for f in files:
+            rel_path = os.path.relpath(os.path.join(root, f), base_dir).replace("\\", "/")
+            lower_f = f.lower()
+            if lower_f.endswith(".txt"):
+                txt_files.append(rel_path)
+            elif lower_f.endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus")):
+                wav_files.append(rel_path)
+                
     return {"txt_files": txt_files, "wav_files": wav_files}
 
 @app.get("/api/inference_files")
 def get_inference_files():
-    inf_dir = AppConfig.get_inf_dir()
-    if not os.path.exists(inf_dir):
+    base_dir = AppConfig.SANDBOX_DIR
+    wav_files = []
+    if not os.path.exists(base_dir):
         return {"wav_files": []}
-    
-    wav_files = [f for f in os.listdir(inf_dir) if f.lower().endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus"))]
+        
+    for root, dirs, files in os.walk(base_dir):
+        if any(ignore in root for ignore in ["venv", "node_modules", ".git"]):
+            continue
+        for f in files:
+            if f.lower().endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus")):
+                rel_path = os.path.relpath(os.path.join(root, f), base_dir).replace("\\", "/")
+                wav_files.append(rel_path)
+                
     return {"wav_files": wav_files}
 
 def countDigits(num): return len(str(num))
@@ -208,13 +274,9 @@ def reformatTranscription(text):
 @app.post("/api/process_elan")
 def process_elan(req: ProcessElanRequest):
     try:
-        tab_path = os.path.join(AppConfig.get_elan_dir(), req.txt_file)
-        wav_path = os.path.join(AppConfig.get_elan_dir(), req.wav_file)
+        tab_path = os.path.join(AppConfig.SANDBOX_DIR, req.txt_file)
+        wav_path = os.path.join(AppConfig.SANDBOX_DIR, req.wav_file)
         
-        if not os.path.exists(wav_path):
-            inf_dir = AppConfig.get_inf_dir()
-            wav_path = os.path.join(inf_dir, req.wav_file)
-            
         if not os.path.exists(wav_path):
             raise HTTPException(status_code=404, detail="wav file not found")
         
@@ -462,25 +524,41 @@ class TranscribeLongRequest(BaseModel):
 @app.post("/api/transcribe_long")
 def transcribe_long(req: TranscribeLongRequest):
     # Assuming audio files are uploaded or present in audiofiles-to-transcribe
-    audio_path = os.path.join(AppConfig.SANDBOX_DIR, "audiofiles-to-transcribe", req.audio_file)
+    audio_path = os.path.join(AppConfig.SANDBOX_DIR, req.audio_file)
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
         
-    model_dir = os.path.join(AppConfig.SANDBOX_DIR, "wav2vec2-model", req.checkpoint)
-    out_tsv = os.path.join(AppConfig.SANDBOX_DIR, "audiofiles-to-transcribe", req.audio_file.rsplit('.', 1)[0] + ".tsv")
+    out_tsv = os.path.join(AppConfig.SANDBOX_DIR, req.audio_file.rsplit('.', 1)[0] + ".tsv")
     
     cmd = [
-        sys.executable, "run_inference.py",
-        "--mode", "long",
-        "--audio_file", audio_path,
-        "--model_dir", model_dir,
-        "--output_tsv", out_tsv
+        sys.executable, "run_inference_julie.py",
+        audio_path
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Inference failed: {res.stderr}")
-        return {"message": "Transcription complete", "tsv_file": out_tsv}
+            
+        transcription = ""
+        lines = res.stdout.splitlines()
+        for i, line in enumerate(lines):
+            if "KENLM DECODING PREDICTIONS:" in line:
+                if i + 1 < len(lines):
+                    transcription = lines[i+1].replace("Transcription:", "").strip()
+                break
+        
+        if not transcription:
+            for i, line in enumerate(lines):
+                if "GREEDY DECODING PREDICTIONS:" in line:
+                    if i + 1 < len(lines):
+                        transcription = lines[i+1].replace("Transcription:", "").strip()
+                    break
+
+        with open(out_tsv, "w", encoding="utf-8") as f:
+            f.write("start\tend\ttranscription\n")
+            f.write(f"0.000\t0.000\t{transcription}\n")
+
+        return {"message": "Transcription complete", "tsv_file": out_tsv, "transcription": transcription}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -491,10 +569,6 @@ def transcribe_mic(
     checkpoint: str = Form(...),
     audio: UploadFile = File(...)
 ):
-    model_dir = os.path.join(AppConfig.SANDBOX_DIR, "wav2vec2-model", checkpoint)
-    if not os.path.exists(model_dir):
-        raise HTTPException(status_code=404, detail="Checkpoint not found")
-        
     # Save uploaded audio to temp file
     temp_id = str(uuid.uuid4())
     temp_wav = os.path.join(tempfile.gettempdir(), f"mic_{temp_id}.wav")
@@ -503,10 +577,8 @@ def transcribe_mic(
         f.write(audio.file.read())
         
     cmd = [
-        sys.executable, "run_inference.py",
-        "--mode", "short",
-        "--audio_file", temp_wav,
-        "--model_dir", model_dir
+        sys.executable, "run_inference_julie.py",
+        temp_wav
     ]
     
     try:
@@ -514,12 +586,20 @@ def transcribe_mic(
         if res.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Inference failed: {res.stderr}")
             
-        # Parse stdout for TRANSCRIPTION: ...
         transcription = ""
-        for line in res.stdout.splitlines():
-            if line.startswith("TRANSCRIPTION:"):
-                transcription = line.split("TRANSCRIPTION:")[1].strip()
+        lines = res.stdout.splitlines()
+        for i, line in enumerate(lines):
+            if "KENLM DECODING PREDICTIONS:" in line:
+                if i + 1 < len(lines):
+                    transcription = lines[i+1].replace("Transcription:", "").strip()
                 break
+        
+        if not transcription:
+            for i, line in enumerate(lines):
+                if "GREEDY DECODING PREDICTIONS:" in line:
+                    if i + 1 < len(lines):
+                        transcription = lines[i+1].replace("Transcription:", "").strip()
+                    break
                 
         return {"transcription": transcription}
     except Exception as e:
