@@ -34,8 +34,8 @@ from pyctcdecode import build_ctcdecoder
 from jiwer import wer as jiwer_wer, cer as jiwer_cer
 
 TARGET_SAMPLE_RATE = 16000
-apostrophe_variants = r"[’‘ʼʻ`´‛]"   # curly, modifier letter, grave/acute, etc.
-chars_to_remove_regex = r'[\,\?\.\!\-\;\:\"\“\%\”\\(\)\[\]\{\}«»…]'
+apostrophe_variants = r"[’‘ʼʻ`´‛]"  # curly, modifier letter, grave/acute, etc.
+chars_to_remove_regex = r"[\,\?\.\!\-\;\:\"\“\%\”\\(\)\[\]\{\}«»…]"
 
 # CONFIGURATION DICTIONARY
 CONFIG = {
@@ -47,23 +47,25 @@ CONFIG = {
     "base_checkpoint": "facebook/wav2vec2-large-xlsr-53",
     "asr_lang": "cim",
     "run_id": "01",
-    "epochs": 30,
+    "epochs": 50,
     "ngrams": 4,
     "lmplz_path": "lmplz",  # Expected in system PATH, or specify full local path (e.g. /usr/local/bin/lmplz)
-    "audio_column": None,   # Auto-detects columns like 'path', 'wav'
-    "text_column": None,    # Auto-detects columns like 'sentence', 'text'
+    "audio_column": None,  # Auto-detects columns like 'path', 'wav'
+    "text_column": None,  # Auto-detects columns like 'sentence', 'text'
     "max_steps": -1,
     "eval_batch_size": 16,
 }
+
 
 def normalize_text(text):
     text = str(text)
     text = unicodedata.normalize("NFC", text)
     text = text.lower()
-    text = re.sub(apostrophe_variants, "'", text)   # unify apostrophes -> '
+    text = re.sub(apostrophe_variants, "'", text)  # unify apostrophes -> '
     text = re.sub(chars_to_remove_regex, "", text)  # remove other punctuation
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
 
 def _try_read_csv(path):
     for sep in [",", "\t", ";", "|"]:
@@ -75,13 +77,29 @@ def _try_read_csv(path):
             continue
     return pd.read_csv(path)
 
+
 def _detect_columns(df, audio_col_override=None, text_col_override=None):
-    audio_candidates = ["path", "audio", "wav", "file", "filename", "filepath", "audio_path"]
-    text_candidates  = ["sentence", "text", "transcription", "transcript", "label", "target"]
+    audio_candidates = [
+        "path",
+        "audio",
+        "wav",
+        "file",
+        "filename",
+        "filepath",
+        "audio_path",
+    ]
+    text_candidates = [
+        "sentence",
+        "text",
+        "transcription",
+        "transcript",
+        "label",
+        "target",
+    ]
     cols_lower = {c.lower(): c for c in df.columns}
 
     audio_col = audio_col_override
-    text_col  = text_col_override
+    text_col = text_col_override
     if audio_col is None:
         for cand in audio_candidates:
             if cand in cols_lower:
@@ -100,6 +118,7 @@ def _detect_columns(df, audio_col_override=None, text_col_override=None):
         )
     return audio_col, text_col
 
+
 def _resolve_audio_path(p, dataset_path):
     p = str(p).strip()
     if os.path.isabs(p) and os.path.exists(p):
@@ -115,6 +134,7 @@ def _resolve_audio_path(p, dataset_path):
             return cand2
     return p
 
+
 @dataclass
 class DataCollatorCTCWithPadding:
     processor: Wav2Vec2Processor
@@ -124,9 +144,13 @@ class DataCollatorCTCWithPadding:
         input_features = [{"input_values": f["input_values"]} for f in features]
         label_features = [{"input_ids": f["labels"]} for f in features]
 
-        batch = self.processor.pad(input_features, padding=self.padding, return_tensors="pt")
+        batch = self.processor.pad(
+            input_features, padding=self.padding, return_tensors="pt"
+        )
         with self.processor.as_target_processor():
-            labels_batch = self.processor.pad(label_features, padding=self.padding, return_tensors="pt")
+            labels_batch = self.processor.pad(
+                label_features, padding=self.padding, return_tensors="pt"
+            )
 
         labels = labels_batch["input_ids"].masked_fill(
             labels_batch.attention_mask.ne(1), -100
@@ -134,20 +158,78 @@ class DataCollatorCTCWithPadding:
         batch["labels"] = labels
         return batch
 
+
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Train Wav2Vec2 on local or remote machine.")
-    parser.add_argument("--train-csv", type=str, default=CONFIG["train_csv"], help="Path to training CSV split.")
-    parser.add_argument("--valid-csv", type=str, default=CONFIG["valid_csv"], help="Path to validation CSV split.")
-    parser.add_argument("--test-csv", type=str, default=CONFIG["test_csv"], help="Path to test CSV split.")
-    parser.add_argument("--audio-dir", type=str, default=CONFIG["audio_dir"], help="Directory containing audio files.")
-    parser.add_argument("--output-dir", type=str, default=CONFIG["output_dir"], help="Output directory for logs and models.")
-    parser.add_argument("--epochs", type=int, default=CONFIG["epochs"], help="Number of training epochs.")
-    parser.add_argument("--lmplz-path", type=str, default=CONFIG["lmplz_path"], help="Path to KenLM lmplz binary.")
-    parser.add_argument("--max-steps", type=int, default=CONFIG["max_steps"], help="Max training steps (-1 for unlimited).")
-    parser.add_argument("--push-to-hub", action="store_true", help="Push checkpoints to Hugging Face Hub.")
-    parser.add_argument("--hub-model-id", type=str, default=None, help="Hugging Face Hub model ID (e.g. username/model_name).")
-    parser.add_argument("--hub-token", type=str, default=None, help="Hugging Face Hub Authentication Token.")
+
+    parser = argparse.ArgumentParser(
+        description="Train Wav2Vec2 on local or remote machine."
+    )
+    parser.add_argument(
+        "--train-csv",
+        type=str,
+        default=CONFIG["train_csv"],
+        help="Path to training CSV split.",
+    )
+    parser.add_argument(
+        "--valid-csv",
+        type=str,
+        default=CONFIG["valid_csv"],
+        help="Path to validation CSV split.",
+    )
+    parser.add_argument(
+        "--test-csv",
+        type=str,
+        default=CONFIG["test_csv"],
+        help="Path to test CSV split.",
+    )
+    parser.add_argument(
+        "--audio-dir",
+        type=str,
+        default=CONFIG["audio_dir"],
+        help="Directory containing audio files.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=CONFIG["output_dir"],
+        help="Output directory for logs and models.",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=CONFIG["epochs"],
+        help="Number of training epochs.",
+    )
+    parser.add_argument(
+        "--lmplz-path",
+        type=str,
+        default=CONFIG["lmplz_path"],
+        help="Path to KenLM lmplz binary.",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=CONFIG["max_steps"],
+        help="Max training steps (-1 for unlimited).",
+    )
+    parser.add_argument(
+        "--push-to-hub",
+        action="store_true",
+        help="Push checkpoints to Hugging Face Hub.",
+    )
+    parser.add_argument(
+        "--hub-model-id",
+        type=str,
+        default=None,
+        help="Hugging Face Hub model ID (e.g. username/model_name).",
+    )
+    parser.add_argument(
+        "--hub-token",
+        type=str,
+        default=None,
+        help="Hugging Face Hub Authentication Token.",
+    )
     args = parser.parse_args()
 
     CONFIG["train_csv"] = args.train_csv
@@ -161,6 +243,20 @@ def main():
     CONFIG["push_to_hub"] = args.push_to_hub
     CONFIG["hub_model_id"] = args.hub_model_id
     CONFIG["hub_token"] = args.hub_token
+
+    if CONFIG["push_to_hub"]:
+        import datetime
+        run_start_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        base_name = CONFIG["hub_model_id"] if CONFIG["hub_model_id"] else "wav2vec2-large-xlsr"
+        if "/" in base_name:
+            parts = base_name.split("/")
+            if len(parts) == 2:
+                CONFIG["hub_model_id"] = f"{parts[0]}/{run_start_time}-{parts[1]}"
+            else:
+                CONFIG["hub_model_id"] = f"{run_start_time}-{base_name}"
+        else:
+            CONFIG["hub_model_id"] = f"{run_start_time}-{base_name}"
+        print(f"Hugging Face Hub Model ID set to: {CONFIG['hub_model_id']}")
 
     # Paths and folders
     os.makedirs(CONFIG["output_dir"], exist_ok=True)
@@ -176,16 +272,20 @@ def main():
     print("Loading CSVs...")
     df_train = _try_read_csv(CONFIG["train_csv"])
     df_valid = _try_read_csv(CONFIG["valid_csv"])
-    df_test  = _try_read_csv(CONFIG["test_csv"])
+    df_test = _try_read_csv(CONFIG["test_csv"])
 
-    audio_col, text_col = _detect_columns(df_train, CONFIG["audio_column"], CONFIG["text_column"])
+    audio_col, text_col = _detect_columns(
+        df_train, CONFIG["audio_column"], CONFIG["text_column"]
+    )
     print(f"Using audio column: '{audio_col}' | text column: '{text_col}'")
     print(f"Sizes: Train={len(df_train)}, Valid={len(df_valid)}, Test={len(df_test)}")
 
     # Resolve paths & normalize transcriptions
     for df in (df_train, df_valid, df_test):
-        df[audio_col] = df[audio_col].apply(lambda p: _resolve_audio_path(p, CONFIG["audio_dir"]))
-        df[text_col]  = df[text_col].apply(normalize_text)
+        df[audio_col] = df[audio_col].apply(
+            lambda p: _resolve_audio_path(p, CONFIG["audio_dir"])
+        )
+        df[text_col] = df[text_col].apply(normalize_text)
         df.dropna(subset=[audio_col, text_col], inplace=True)
 
     # Audio file checks
@@ -197,7 +297,9 @@ def main():
 
     # Vocab / Tokenizer
     print("Building vocabulary...")
-    all_text = " ".join(pd.concat([df_train[text_col], df_valid[text_col], df_test[text_col]]).tolist())
+    all_text = " ".join(
+        pd.concat([df_train[text_col], df_valid[text_col], df_test[text_col]]).tolist()
+    )
     vocab = sorted(set(all_text))
     vocab_dict = {v: k for k, v in enumerate(vocab)}
     if " " in vocab_dict:
@@ -233,7 +335,9 @@ def main():
     # Build KenLM Language Model
     print("Building KenLM model...")
     corpus_file = os.path.join(CONFIG["output_dir"], f"{CONFIG['asr_lang']}-corpus.txt")
-    all_sentences = pd.concat([df_train[text_col], df_valid[text_col], df_test[text_col]]).tolist()
+    all_sentences = pd.concat(
+        [df_train[text_col], df_valid[text_col], df_test[text_col]]
+    ).tolist()
     with open(corpus_file, "w", encoding="utf-8") as f:
         for s in all_sentences:
             s = s.strip()
@@ -254,24 +358,32 @@ def main():
         if os.path.exists(local_lmplz):
             lmplz_cmd = local_lmplz
         else:
-            print(f"Error: '{lmplz_cmd}' not found on system PATH and no pre-built KenLM found at {local_lmplz}.")
-            print("Please run 'install_requirements.sh' first to install and compile dependencies.")
+            print(
+                f"Error: '{lmplz_cmd}' not found on system PATH and no pre-built KenLM found at {local_lmplz}."
+            )
+            print(
+                "Please run 'install_requirements.sh' first to install and compile dependencies."
+            )
             sys.exit(1)
 
     # Invoke lmplz
     try:
         print(f"Running {lmplz_cmd}...")
-        with open(corpus_file, "r", encoding="utf-8") as infile, open(arpa_path, "w", encoding="utf-8") as outfile:
+        with open(corpus_file, "r", encoding="utf-8") as infile, open(
+            arpa_path, "w", encoding="utf-8"
+        ) as outfile:
             subprocess.run(
                 [lmplz_cmd, "-o", str(CONFIG["ngrams"]), "--discount_fallback"],
                 stdin=infile,
                 stdout=outfile,
-                check=True
+                check=True,
             )
         print(f"ARPA model built: {arpa_path}")
     except Exception as e:
         print(f"Error executing lmplz: {e}")
-        print("Please ensure KenLM command 'lmplz' is installed and in your PATH, or specify via CONFIG['lmplz_path']")
+        print(
+            "Please ensure KenLM command 'lmplz' is installed and in your PATH, or specify via CONFIG['lmplz_path']"
+        )
         sys.exit(1)
 
     # Patch ARPA with </s> to fix pyctcdecode expectations if needed
@@ -294,23 +406,21 @@ def main():
     # Build HuggingFace datasets
     print("Preparing HuggingFace Datasets...")
     from datasets import Features, Value
-    features = Features({
-        "audio": Audio(sampling_rate=TARGET_SAMPLE_RATE),
-        "sentence": Value("string")
-    })
+
+    features = Features(
+        {"audio": Audio(sampling_rate=TARGET_SAMPLE_RATE), "sentence": Value("string")}
+    )
+
     def df_to_ds(df):
         # HuggingFace Datasets Audio feature expects a list of paths or dicts.
         # Let's build a dict and pass features.
-        data_dict = {
-            "audio": df[audio_col].tolist(),
-            "sentence": df[text_col].tolist()
-        }
+        data_dict = {"audio": df[audio_col].tolist(), "sentence": df[text_col].tolist()}
         ds = Dataset.from_dict(data_dict, features=features)
         return ds
 
     train_ds = df_to_ds(df_train)
     valid_ds = df_to_ds(df_valid)
-    test_ds  = df_to_ds(df_test)
+    test_ds = df_to_ds(df_test)
 
     def prepare_batch(batch):
         audio = batch["audio"]
@@ -322,12 +432,22 @@ def main():
             batch["labels"] = processor(batch["sentence"]).input_ids
         return batch
 
-    train_ds = train_ds.map(prepare_batch, remove_columns=train_ds.column_names, num_proc=1)
-    valid_ds = valid_ds.map(prepare_batch, remove_columns=valid_ds.column_names, num_proc=1)
-    test_ds_prepared = test_ds.map(prepare_batch, remove_columns=[c for c in test_ds.column_names if c != "sentence"], num_proc=1)
+    train_ds = train_ds.map(
+        prepare_batch, remove_columns=train_ds.column_names, num_proc=1
+    )
+    valid_ds = valid_ds.map(
+        prepare_batch, remove_columns=valid_ds.column_names, num_proc=1
+    )
+    test_ds_prepared = test_ds.map(
+        prepare_batch,
+        remove_columns=[c for c in test_ds.column_names if c != "sentence"],
+        num_proc=1,
+    )
 
     MAX_INPUT_LENGTH = TARGET_SAMPLE_RATE * 20
-    train_ds = train_ds.filter(lambda x: x < MAX_INPUT_LENGTH, input_columns=["input_length"])
+    train_ds = train_ds.filter(
+        lambda x: x < MAX_INPUT_LENGTH, input_columns=["input_length"]
+    )
 
     # Load Metrics
     wer_metric = evaluate.load("wer")
@@ -415,12 +535,19 @@ def main():
         device = "cpu"
 
     import glob
+
     ckpt_dirs = glob.glob(os.path.join(folder_model_files, "checkpoint-*"))
+
     def _step(p):
         m = re.search(r"checkpoint-(\d+)", os.path.basename(p))
         return int(m.group(1)) if m else -1
+
     ckpt_dirs = sorted(ckpt_dirs, key=_step)
-    checkpoints = [(os.path.basename(d), d) for d in ckpt_dirs if os.path.exists(os.path.join(d, "config.json"))]
+    checkpoints = [
+        (os.path.basename(d), d)
+        for d in ckpt_dirs
+        if os.path.exists(os.path.join(d, "config.json"))
+    ]
 
     if not checkpoints:
         print("No checkpoints found. Running evaluation on final model.")
@@ -451,7 +578,23 @@ def main():
     import multiprocessing
 
     num_cores = os.cpu_count() or 1
-    pool = multiprocessing.get_context("fork").Pool(processes=num_cores)
+    # On CUDA/NVIDIA machines, using the 'fork' start method after initializing CUDA
+    # (which happens during training) will cause runtime crashes or deadlocks.
+    # Since pyctcdecode is not easily pickleable, we cannot use 'spawn'.
+    # Therefore, we fall back to sequential decoding (pool = None) when CUDA is active.
+    if torch.cuda.is_available():
+        print(
+            "CUDA detected. Using sequential decoding to avoid CUDA multiprocessing fork issues."
+        )
+        pool = None
+    else:
+        try:
+            pool = multiprocessing.get_context("fork").Pool(processes=num_cores)
+        except Exception as e:
+            print(
+                f"Failed to initialize multiprocessing pool with fork: {e}. Falling back to sequential decoding."
+            )
+            pool = None
 
     rows_by_ckpt = {}
     try:
@@ -474,15 +617,23 @@ def main():
             print("  Running GPU batch inference...")
             for batch in tqdm(test_loader, desc=f"Inference ({ckpt_label})"):
                 input_values = batch["input_values"].to(device)
-                attention_mask = batch["attention_mask"].to(device) if "attention_mask" in batch else None
+                attention_mask = (
+                    batch["attention_mask"].to(device)
+                    if "attention_mask" in batch
+                    else None
+                )
 
                 with torch.no_grad():
-                    outputs = ckpt_model(input_values=input_values, attention_mask=attention_mask)
+                    outputs = ckpt_model(
+                        input_values=input_values, attention_mask=attention_mask
+                    )
                     logits = outputs.logits
 
                 if attention_mask is not None:
                     input_lengths = attention_mask.sum(dim=-1)
-                    output_lengths = ckpt_model._get_feat_extract_output_lengths(input_lengths)
+                    output_lengths = ckpt_model._get_feat_extract_output_lengths(
+                        input_lengths
+                    )
                     output_lengths = output_lengths.cpu().numpy()
                 else:
                     output_lengths = [logits.shape[1]] * logits.shape[0]
@@ -507,7 +658,9 @@ def main():
                 for start_idx in range(0, num_logits, chunk_size):
                     end_idx = min(start_idx + chunk_size, num_logits)
                     logits_chunk = all_logits[start_idx:end_idx]
-                    decoded_texts = processor_with_lm.decoder.decode_batch(pool, logits_chunk)
+                    decoded_texts = processor_with_lm.decoder.decode_batch(
+                        pool, logits_chunk
+                    )
                     for text in decoded_texts:
                         all_lm_hypotheses.append(text.strip())
                     pbar.update(end_idx - start_idx)
@@ -519,17 +672,19 @@ def main():
                 hyp_lm = all_lm_hypotheses[idx]
 
                 ref_m = safe(reference)
-                ckpt_rows.append({
-                    "checkpoint": ckpt_label,
-                    "index": idx,
-                    "gold": reference,
-                    "hyp_greedy": hyp_greedy,
-                    "hyp_kenlm": hyp_lm,
-                    "wer_greedy": jiwer_wer(ref_m, safe(hyp_greedy)),
-                    "cer_greedy": jiwer_cer(ref_m, safe(hyp_greedy)),
-                    "wer_kenlm":  jiwer_wer(ref_m, safe(hyp_lm)),
-                    "cer_kenlm":  jiwer_cer(ref_m, safe(hyp_lm)),
-                })
+                ckpt_rows.append(
+                    {
+                        "checkpoint": ckpt_label,
+                        "index": idx,
+                        "gold": reference,
+                        "hyp_greedy": hyp_greedy,
+                        "hyp_kenlm": hyp_lm,
+                        "wer_greedy": jiwer_wer(ref_m, safe(hyp_greedy)),
+                        "cer_greedy": jiwer_cer(ref_m, safe(hyp_greedy)),
+                        "wer_kenlm": jiwer_wer(ref_m, safe(hyp_lm)),
+                        "cer_kenlm": jiwer_cer(ref_m, safe(hyp_lm)),
+                    }
+                )
             rows_by_ckpt[ckpt_label] = ckpt_rows
             del ckpt_model
             if device == "cuda":
@@ -537,33 +692,51 @@ def main():
             elif device == "mps":
                 torch.mps.empty_cache()
     finally:
-        pool.close()
-        pool.join()
+        if pool is not None:
+            pool.close()
+            pool.join()
 
     ranking = []
     for ckpt_label, rows in rows_by_ckpt.items():
         df = pd.DataFrame(rows)
-        ranking.append({
-            "checkpoint": ckpt_label,
-            "median_wer_kenlm": float(np.median(df["wer_kenlm"])),
-            "median_cer_kenlm": float(np.median(df["cer_kenlm"])),
-            "agg_wer_kenlm":    jiwer_wer(list(df["gold"]), list(df["hyp_kenlm"])),
-            "agg_cer_kenlm":    jiwer_cer(list(df["gold"]), list(df["hyp_kenlm"])),
-        })
+        ranking.append(
+            {
+                "checkpoint": ckpt_label,
+                "median_wer_kenlm": float(np.median(df["wer_kenlm"])),
+                "median_cer_kenlm": float(np.median(df["cer_kenlm"])),
+                "agg_wer_kenlm": jiwer_wer(list(df["gold"]), list(df["hyp_kenlm"])),
+                "agg_cer_kenlm": jiwer_cer(list(df["gold"]), list(df["hyp_kenlm"])),
+            }
+        )
 
-    ranking_df = pd.DataFrame(ranking).sort_values(
-        by=["median_wer_kenlm", "median_cer_kenlm", "agg_wer_kenlm", "agg_cer_kenlm"],
-        ascending=True,
-    ).reset_index(drop=True)
+    ranking_df = (
+        pd.DataFrame(ranking)
+        .sort_values(
+            by=[
+                "median_wer_kenlm",
+                "median_cer_kenlm",
+                "agg_wer_kenlm",
+                "agg_cer_kenlm",
+            ],
+            ascending=True,
+        )
+        .reset_index(drop=True)
+    )
 
     best_ckpt_label = ranking_df.iloc[0]["checkpoint"]
-    best_ckpt_path  = dict(checkpoints)[best_ckpt_label]
+    best_ckpt_path = dict(checkpoints)[best_ckpt_label]
     print(f"\nBest checkpoint identified: {best_ckpt_label}")
 
     # Copy best checkpoint files to final model output
     for fname in os.listdir(best_ckpt_path):
-        if fname in ("optimizer.pt", "scheduler.pt", "rng_state.pth",
-                     "trainer_state.json", "training_args.bin", "scaler.pt"):
+        if fname in (
+            "optimizer.pt",
+            "scheduler.pt",
+            "rng_state.pth",
+            "trainer_state.json",
+            "training_args.bin",
+            "scaler.pt",
+        ):
             continue
         src = os.path.join(best_ckpt_path, fname)
         if os.path.isfile(src):
@@ -580,16 +753,21 @@ def main():
     results_df = pd.DataFrame(all_rows)
 
     output_prefix = f"{CONFIG['asr_lang']}-wav2vec2"
-    per_sentence_csv = os.path.join(folder_log_files, f"{output_prefix}-run{CONFIG['run_id']}-test-results.csv")
+    per_sentence_csv = os.path.join(
+        folder_log_files, f"{output_prefix}-run{CONFIG['run_id']}-test-results.csv"
+    )
     results_df.to_csv(per_sentence_csv, index=False, encoding="utf-8")
 
     # Generate summary.txt
-    summary_txt = os.path.join(folder_log_files, f"{output_prefix}-run{CONFIG['run_id']}-summary.txt")
+    summary_txt = os.path.join(
+        folder_log_files, f"{output_prefix}-run{CONFIG['run_id']}-summary.txt"
+    )
     with open(summary_txt, "w", encoding="utf-8") as f:
         f.write(f"ASR Language: {CONFIG['asr_lang']}\nRun ID: {CONFIG['run_id']}\n")
         f.write(f"Promoted checkpoint: {best_ckpt_label}\n")
         f.write(f"Ranking:\n{ranking_df.to_string()}\n")
     print(f"Summary written to {summary_txt}")
+
 
 if __name__ == "__main__":
     main()
