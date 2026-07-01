@@ -32,3 +32,8 @@ remote_output_w2v2/
 run*.txt
 test_inference_results.csv
 
+# segment output directories
+segments/
+charlie_segments/
+
+
