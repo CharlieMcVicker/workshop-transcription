@@ -49,3 +49,10 @@ RUN pip install --no-cache-dir \
 
 # Set default working directory
 WORKDIR /workspace
+
+# Copy prepared training dataset CSVs and audio files directly into the container
+COPY cim-wav2vec2-train.csv /workspace/cim-wav2vec2-train.csv
+COPY cim-wav2vec2-valid.csv /workspace/cim-wav2vec2-valid.csv
+COPY cim-wav2vec2-test.csv /workspace/cim-wav2vec2-test.csv
+COPY sentence_audio /workspace/sentence_audio
+
