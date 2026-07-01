@@ -1,7 +1,7 @@
 ---
 id: TASK-58
 title: Commit and push tone normalization changes
-status: In Progress
+status: Done
 assignee:
   - '@myself'
 created_date: '2026-07-01 23:01'
@@ -19,6 +19,12 @@ Commit and push changes related to word-final vowel tone 2 and checkpoint prefix
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Commit all changes to Git
-- [ ] #2 Push changes to remote repository
+- [x] #1 Commit all changes to Git
+- [x] #2 Push changes to remote repository
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Committed and pushed the tone normalization updates, checkpoint naming updates, regenerated CSV data splits, and backlog task files to the remote repository on the main branch.
+<!-- SECTION:FINAL_SUMMARY:END -->
