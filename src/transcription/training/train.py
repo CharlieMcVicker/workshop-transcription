@@ -247,15 +247,16 @@ def main():
     if CONFIG["push_to_hub"]:
         import datetime
         run_start_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        prefix = f"with-final-tone-{run_start_time}"
         base_name = CONFIG["hub_model_id"] if CONFIG["hub_model_id"] else "wav2vec2-large-xlsr"
         if "/" in base_name:
             parts = base_name.split("/")
             if len(parts) == 2:
-                CONFIG["hub_model_id"] = f"{parts[0]}/{run_start_time}-{parts[1]}"
+                CONFIG["hub_model_id"] = f"{parts[0]}/{prefix}-{parts[1]}"
             else:
-                CONFIG["hub_model_id"] = f"{run_start_time}-{base_name}"
+                CONFIG["hub_model_id"] = f"{prefix}-{base_name}"
         else:
-            CONFIG["hub_model_id"] = f"{run_start_time}-{base_name}"
+            CONFIG["hub_model_id"] = f"{prefix}-{base_name}"
         print(f"Hugging Face Hub Model ID set to: {CONFIG['hub_model_id']}")
 
     # Paths and folders
