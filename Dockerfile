@@ -54,11 +54,11 @@ WORKDIR /workspace
 RUN python3 -c "from transformers import Wav2Vec2ForCTC; Wav2Vec2ForCTC.from_pretrained('facebook/wav2vec2-large-xlsr-53')"
 
 # Copy the package source and data directories directly into the container
-COPY src /workspace/src
+COPY transcription /workspace/transcription
 COPY data /workspace/data
 
 # Ensure Python knows where to find the transcription package modules
-ENV PYTHONPATH="/workspace/src:${PYTHONPATH}"
+ENV PYTHONPATH="/workspace:${PYTHONPATH}"
 
 
 

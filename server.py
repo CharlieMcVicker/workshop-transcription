@@ -1,7 +1,7 @@
 import os
 import sys
 import random
-sys.path.insert(0, os.path.abspath('src'))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 import subprocess
 import wave
 import contextlib

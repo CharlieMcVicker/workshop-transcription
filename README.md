@@ -6,23 +6,22 @@ This repository contains tools for processing audio transcription files, segment
 
 ```
 workshop-transcription/
-├── src/                          # All Python source code
-│   └── transcription/            # Main package
-│       ├── audio/                # Audio preprocessing and segmentation
-│       │   ├── segment.py        # Hyperparameter sweep / segment evaluation
-│       │   └── extract.py        # Extract audio segments and write manifest
-│       ├── inference/            # Model inference and active labeling
-│       │   ├── single.py         # Run inference on a single audio file
-│       │   ├── batch.py          # Batch inference on a directory of WAVs
-│       │   └── labeler.py        # Web-based interface for low-confidence labeling
-│       ├── training/             # Training, evaluation, and data prep
-│       │   ├── prepare_csv.py    # Prepare training splits from raw CSV
-│       │   ├── train.py          # Offline/local/remote Wav2Vec2 training
-│       │   ├── evaluate_checkpoint.py # Score checkpoint against test set
-│       │   └── evaluate_revisions.py  # Score Git revisions from Hugging Face
-│       └── utils/                # Utilities and checks
-│           ├── tone_normalization.py  # Normalizes tones in transcripts
-│           └── verify_mps.py          # Verifies PyTorch MPS backend support
+├── transcription/                # Main package and source code
+│   ├── audio/                    # Audio preprocessing and segmentation
+│   │   ├── segment.py            # Hyperparameter sweep / segment evaluation
+│   │   └── extract.py            # Extract audio segments and write manifest
+│   ├── inference/                # Model inference and active labeling
+│   │   ├── single.py             # Run inference on a single audio file
+│   │   ├── batch.py              # Batch inference on a directory of WAVs
+│   │   └── labeler.py            # Web-based interface for low-confidence labeling
+│   ├── training/                 # Training, evaluation, and data prep
+│   │   ├── prepare_csv.py        # Prepare training splits from raw CSV
+│   │   ├── train.py              # Offline/local/remote Wav2Vec2 training
+│   │   ├── evaluate_checkpoint.py # Score checkpoint against test set
+│   │   └── evaluate_revisions.py  # Score Git revisions from Hugging Face
+│   └── utils/                    # Utilities and checks
+│       ├── tone_normalization.py  # Normalizes tones in transcripts
+│       └── verify_mps.py          # Verifies PyTorch MPS backend support
 │
 ├── data/                         # Dedicated data directories
 │   ├── raw/                      # Raw unsegmented audio files and datasets
