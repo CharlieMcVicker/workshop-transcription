@@ -1,0 +1,72 @@
+# Model directories & checkpoints
+pretrained_models/
+**/pretrained_models/
+wav2vec2-model/
+**/wav2vec2-model/
+whisper-model/
+**/whisper-model/
+checkpoint-*/
+**/checkpoint-*/
+logs-wav2vec2-res/
+logs-whisper-res/
+**/logs-wav2vec2-res/
+**/logs-whisper-res/
+
+# Model binaries & checkpoints
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.h5
+*.pb
+*.pkl
+*.joblib
+*.arpa
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+all-wavs/
+audiofiles-to-transcribe/
+wav/
+**/audiofiles-to-transcribe/
+**/sentence_audio/
+**/wav/
+
+# ELAN / Annotation files
+processed-elan-files/
+**/processed-elan-files/
+
+# Spreadsheets/datasets & temp TSV directories
+*.xlsx
+**/tsv-inputs/
+**/tsv-outputs/
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python caches and notebook checkpoints
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Node/JavaScript dependencies
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.env
+
+# OS/System files
+.DS_Store
+Thumbs.db
