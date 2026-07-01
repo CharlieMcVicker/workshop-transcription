@@ -152,13 +152,27 @@ def main():
 
     logits_np = logits.squeeze(0).cpu().numpy()
 
-    # Greedy decode
-    pred_ids = np.argmax(logits_np, axis=-1)
+    # Softmax to get confidence probabilities
+    probs = torch.nn.functional.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
+    pred_ids = np.argmax(probs, axis=-1)
     greedy_raw = processor.decode(pred_ids).strip()
+
+    # Calculate token level confidence
+    token_probs = probs[np.arange(len(pred_ids)), pred_ids]
+    pad_id = getattr(processor.tokenizer, "pad_token_id", None)
+    if pad_id is None:
+        pad_id = processor.tokenizer.vocab.get("[PAD]", 0)
+    
+    non_pad_mask = pred_ids != pad_id
+    if non_pad_mask.any():
+        greedy_confidence = float(np.mean(token_probs[non_pad_mask]))
+    else:
+        greedy_confidence = float(np.mean(token_probs))
 
     print("\n" + "=" * 60)
     print("GREEDY DECODING PREDICTIONS:")
     print(f"  Transcription: {greedy_raw}")
+    print(f"  Confidence:    {greedy_confidence:.4f} ({greedy_confidence:.2%})")
     print("=" * 60 + "\n")
 
     # KenLM decode
@@ -181,12 +195,23 @@ def main():
             decoder=decoder,
         )
 
-        # Run LM decode
-        lm_raw = processor_with_lm.decoder.decode(logits_np).strip()
+        # Run LM decode using decode_beams to get confidence/scores
+        beams = processor_with_lm.decoder.decode_beams(logits_np)
+        if beams:
+            best_beam = beams[0]
+            lm_raw = best_beam[0].strip()
+            logit_score = float(best_beam[3])
+            combined_score = float(best_beam[4])
+        else:
+            lm_raw = ""
+            logit_score = 0.0
+            combined_score = 0.0
 
         print("=" * 60)
         print("KENLM DECODING PREDICTIONS:")
-        print(f"  Transcription: {lm_raw}")
+        print(f"  Transcription:  {lm_raw}")
+        print(f"  Logit Score:    {logit_score:.4f}")
+        print(f"  Combined Score: {combined_score:.4f}")
         print("=" * 60 + "\n")
     else:
         print(f"Warning: ARPA model '{args.arpa}' not found. Skipping KenLM decoding.")

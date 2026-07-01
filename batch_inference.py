@@ -153,12 +153,12 @@ def main():
         else:
             print(f"Warning: ARPA model '{args.arpa}' not found. Skipping KenLM decoding.", flush=True)
 
-    results = []
-
     # Write headers to CSV output file immediately
-    headers = ["file_path", "filename", "greedy_transcription"]
+    headers = ["file_path", "filename", "greedy_transcription", "greedy_confidence"]
     if processor_with_lm:
         headers.append("kenlm_transcription")
+        headers.append("kenlm_logit_score")
+        headers.append("kenlm_combined_score")
 
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -218,16 +218,39 @@ def main():
 
             logits_np = logits.squeeze(0).cpu().numpy()
 
-            # Greedy decode
-            pred_ids = np.argmax(logits_np, axis=-1)
+            # Softmax to get confidence probabilities
+            probs = torch.nn.functional.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
+            pred_ids = np.argmax(probs, axis=-1)
             greedy_raw = processor.decode(pred_ids).strip()
 
-            row = [audio_path, filename, greedy_raw]
+            # Calculate token level confidence
+            token_probs = probs[np.arange(len(pred_ids)), pred_ids]
+            pad_id = getattr(processor.tokenizer, "pad_token_id", None)
+            if pad_id is None:
+                pad_id = processor.tokenizer.vocab.get("[PAD]", 0)
+            
+            non_pad_mask = pred_ids != pad_id
+            if non_pad_mask.any():
+                greedy_confidence = float(np.mean(token_probs[non_pad_mask]))
+            else:
+                greedy_confidence = float(np.mean(token_probs))
+
+            row = [audio_path, filename, greedy_raw, f"{greedy_confidence:.4f}"]
 
             # KenLM decode
             if processor_with_lm:
-                lm_raw = processor_with_lm.decoder.decode(logits_np).strip()
-                row.append(lm_raw)
+                beams = processor_with_lm.decoder.decode_beams(logits_np)
+                if beams:
+                    best_beam = beams[0]
+                    lm_raw = best_beam[0].strip()
+                    logit_score = float(best_beam[3])
+                    combined_score = float(best_beam[4])
+                else:
+                    lm_raw = ""
+                    logit_score = 0.0
+                    combined_score = 0.0
+                
+                row.extend([lm_raw, f"{logit_score:.4f}", f"{combined_score:.4f}"])
 
             # Append to CSV output file
             with open(args.output, "a", newline="", encoding="utf-8") as f:
@@ -241,9 +264,9 @@ def main():
             eta = remaining * avg_duration
             
             print(f"[{i}/{len(wav_files)}] {filename} ({duration:.2f}s, avg: {avg_duration:.2f}s, ETA: {eta:.1f}s)", flush=True)
-            print(f"  Greedy: {greedy_raw}", flush=True)
+            print(f"  Greedy: {greedy_raw} (Confidence: {greedy_confidence:.4f})", flush=True)
             if processor_with_lm:
-                print(f"  KenLM:  {lm_raw}", flush=True)
+                print(f"  KenLM:  {lm_raw} (Logit: {logit_score:.4f}, Combined: {combined_score:.4f})", flush=True)
 
         except Exception as e:
             print(f"Error processing {filename}: {e}", flush=True)
