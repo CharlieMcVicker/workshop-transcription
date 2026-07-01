@@ -913,6 +913,242 @@ function View5({ theme }) {
  );
 }
 
+function View6({ theme }) {
+ const t = theme;
+ const [segments, setSegments] = useState([]);
+ const [currentIndex, setCurrentIndex] = useState(-1);
+ const [searchVal, setSearchVal] = useState("");
+ const [status, setStatus] = useState(null);
+ const [loading, setLoading] = useState(false);
+ const [labelInput, setLabelInput] = useState("");
+ const [csvFiles, setCsvFiles] = useState([]);
+ const [selectedCsv, setSelectedCsv] = useState("");
+ const [showTones, setShowTones] = useState(true);
+
+ const formatText = (txt) => {
+   if (!txt) return txt;
+   return showTones ? txt : txt.replace(/[0-9]/g, '');
+ };
+
+ useEffect(() => {
+   fetch("http://localhost:8000/api/files")
+     .then(res => res.json())
+     .then(data => {
+       setCsvFiles(data.csv_files || []);
+     })
+     .catch(err => console.log("Failed to fetch files", err));
+ }, []);
+
+ const loadData = async (file) => {
+   const fileToLoad = file || selectedCsv;
+   if (!fileToLoad) return;
+   setLoading(true);
+   try {
+     const res = await fetch(`http://localhost:8000/api/labeler/data?file=${encodeURIComponent(fileToLoad)}`);
+     const result = await res.json();
+     if (res.ok && result.status === 'success') {
+       setSegments(result.data);
+     } else {
+       setStatus(`❌ Error: ${result.detail || result.message}`);
+     }
+   } catch (err) {
+     setStatus(`❌ Error fetching data: ${err.message}`);
+   }
+   setLoading(false);
+ };
+
+ const selectSegment = (index) => {
+   setCurrentIndex(index);
+   const seg = segments[index];
+   if (seg) {
+     setLabelInput(formatText(seg.labeled_sentence || seg.greedy_transcription));
+   }
+ };
+
+ const submitLabel = () => {
+   if (currentIndex !== -1 && segments[currentIndex]) {
+     const newSegments = [...segments];
+     newSegments[currentIndex].labeled_sentence = labelInput.trim();
+     setSegments(newSegments);
+     setStatus(`✅ Label stored locally for segment ${currentIndex}`);
+     
+     // Advance
+     navigate(1);
+   }
+ };
+
+ const navigate = (direction) => {
+   const nextIdx = currentIndex + direction;
+   if (nextIdx >= 0 && nextIdx < segments.length) {
+     selectSegment(nextIdx);
+   } else {
+     setCurrentIndex(-1);
+   }
+ };
+
+ const saveAllLabels = async () => {
+   const labeled = segments
+     .filter(seg => !!seg.labeled_sentence)
+     .map(seg => ({
+       path: seg.file_path,
+       sentence: seg.labeled_sentence
+     }));
+
+   setLoading(true);
+   setStatus("Saving labels to CSV...");
+   try {
+     const res = await fetch("http://localhost:8000/api/labeler/save", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ labels: labeled })
+     });
+     const result = await res.json();
+     if (res.ok && result.status === 'success') {
+       setStatus(`✅ Successfully saved ${labeled.length} labels to CSV.`);
+     } else {
+       setStatus(`❌ Error: ${result.detail || result.message}`);
+     }
+   } catch (err) {
+     setStatus(`❌ Error saving data: ${err.message}`);
+   }
+   setLoading(false);
+ };
+
+ const getConfidenceClass = (conf) => {
+   if (conf < 0.8) return "text-red-600 font-bold";
+   if (conf < 0.95) return "text-orange-500 font-bold";
+   return "text-green-600 font-bold";
+ };
+
+ const filteredSegments = segments.filter(seg => 
+   !searchVal || seg.greedy_transcription.toLowerCase().includes(searchVal.toLowerCase())
+ );
+
+ return (
+   <div className="max-w-6xl mx-auto text-center flex flex-col md:flex-row gap-6 text-left">
+     {/* Sidebar */}
+     <div className={`md:w-1/3 flex flex-col ${t.card} p-4 h-[80vh]`}>
+       <h2 className={`text-xl font-bold mb-2`}>Active Labeler</h2>
+       
+       <div className="mb-4">
+         <label className={`block text-sm font-medium ${t.label} mb-1`}>Results CSV File</label>
+         <FileTreeSelector 
+           files={csvFiles} 
+           selectedFile={selectedCsv} 
+           onSelect={f => {
+             setSelectedCsv(f);
+             loadData(f);
+           }} 
+           theme={t} 
+         />
+       </div>
+
+       <p className={`text-sm mb-4 ${t.inputInfoSub}`}>Sorted by lowest confidence.</p>
+       
+       <div className={`mb-4 flex items-center ${t.checkboxContainer}`}>
+         <input 
+           type="checkbox" 
+           checked={showTones} 
+           onChange={(e) => setShowTones(e.target.checked)} 
+           className={t.checkbox}
+           id="showTonesLabeler"
+         />
+         <label htmlFor="showTonesLabeler" className={t.checkboxText}>See Tones (Numbers)</label>
+       </div>
+       
+       <div className="flex gap-2 mb-4">
+         <input 
+           type="text" 
+           className={`flex-1 p-2 ${t.input} mb-0`} 
+           placeholder="Search transcription..." 
+           value={searchVal}
+           onChange={e => setSearchVal(e.target.value)}
+         />
+         <button onClick={saveAllLabels} disabled={loading} className={`${t.buttonPrimary}`}>Save CSV</button>
+       </div>
+
+       <div className="flex-1 overflow-y-auto border border-gray-400">
+         {filteredSegments.slice(0, 200).map((seg) => {
+           const idx = segments.indexOf(seg);
+           const isActive = idx === currentIndex;
+           const hasLabel = !!seg.labeled_sentence;
+           return (
+             <div 
+               key={idx} 
+               onClick={() => selectSegment(idx)}
+               className={`p-3 border-b border-gray-500 cursor-pointer ${isActive ? t.inputInfo + ' border-l-4 border-blue-500' : 'opacity-70 hover:opacity-100'}`}
+             >
+               <div className="flex justify-between text-xs mb-1">
+                 <span className={getConfidenceClass(seg.greedy_confidence)}>{seg.greedy_confidence.toFixed(4)}</span>
+                 <span className="truncate max-w-[150px] opacity-70" title={seg.filename}>{seg.filename}</span>
+               </div>
+               <div className="text-sm">
+                 {hasLabel ? <strong>[L] {formatText(seg.labeled_sentence)}</strong> : formatText(seg.greedy_transcription)}
+               </div>
+             </div>
+           );
+         })}
+         {filteredSegments.length === 0 && (
+           <div className="p-4 text-center text-sm text-gray-500">No segments found.</div>
+         )}
+       </div>
+     </div>
+
+     {/* Workspace */}
+     <div className={`md:w-2/3 flex flex-col ${t.card} p-6 h-[80vh] overflow-y-auto justify-center`}>
+       {currentIndex === -1 ? (
+         <div className="text-center text-gray-500">
+           <h3 className="text-xl font-bold mb-2">Select a segment to start</h3>
+           <p>Low confidence entries are sorted at the top of the list.</p>
+         </div>
+       ) : (
+         <div className="text-left w-full max-w-2xl mx-auto">
+           <h2 className={`text-2xl font-bold mb-6 ${t.viewTitle}`}>Label Segment</h2>
+           
+           <div className={`p-4 mb-6 ${t.inputInfo}`}>
+             <audio src={`http://localhost:8000/api/audio/${segments[currentIndex].file_path}`} controls autoPlay className="w-full mb-2" />
+             <div className="text-xs text-gray-500 break-all font-mono">{segments[currentIndex].file_path}</div>
+           </div>
+
+           <div className="mb-6">
+             <label className={`block text-sm font-medium ${t.label} mb-2 uppercase tracking-wide text-gray-500`}>
+               Original Transcription (Confidence: {segments[currentIndex].greedy_confidence.toFixed(4)})
+             </label>
+             <div className={`p-3 text-lg opacity-80 ${t.inputInfo}`}>
+               {formatText(segments[currentIndex].greedy_transcription) || <i className="text-gray-400">(Empty)</i>}
+             </div>
+           </div>
+
+           <div className="mb-8">
+             <label className={`block text-sm font-medium ${t.label} mb-2 uppercase tracking-wide text-gray-500`}>
+               Correction / Labeled Sentence
+             </label>
+             <input 
+               type="text" 
+               className={`w-full p-4 text-lg ${t.input}`}
+               value={labelInput}
+               onChange={e => setLabelInput(e.target.value)}
+               onKeyDown={e => { if (e.key === 'Enter') submitLabel(); }}
+               autoFocus
+             />
+           </div>
+
+           <div className="flex justify-between">
+             <button onClick={() => navigate(-1)} className={`py-2 px-6 ${t.buttonSecondary}`}>Previous</button>
+             <button onClick={submitLabel} className={`py-2 px-6 ${t.buttonPrimary}`}>Save & Next</button>
+           </div>
+         </div>
+       )}
+       {status && (
+         <div className={`mt-6 p-4 border text-center ${status.includes('❌') ? t.errorMsg : (status.includes('✅') ? t.successMsg : t.inputInfo)}`}>
+           {status}
+         </div>
+       )}
+     </div>
+   </div>
+ );
+}
+
 const TABS = [
  { id: 0, name: "VAD Segmentation", title: "Auto-segment Long Audio" },
  { id: 1, name: "Data Preparation", title: "ELAN to WAV and CSV" },
@@ -920,6 +1156,7 @@ const TABS = [
  { id: 3, name: "Training", title: "Train Wav2Vec2 Model" },
  { id: 4, name: "Inference", title: "Transcribe Long Recording" },
  { id: 5, name: "Microphone", title: "Transcribe from Mic" },
+ { id: 6, name: "Active Labeling", title: "Active Labeling Tool" },
 ];
 
 export default function App() {
@@ -1001,6 +1238,7 @@ export default function App() {
           {activeTab === 3 && <View3 theme={t} />}
           {activeTab === 4 && <View4 theme={t} />}
           {activeTab === 5 && <View5 theme={t} />}
+          {activeTab === 6 && <View6 theme={t} />}
         </div>
       </main>
     </div>

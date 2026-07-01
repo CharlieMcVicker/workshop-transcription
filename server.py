@@ -1,6 +1,7 @@
 import os
 import sys
 import random
+sys.path.insert(0, os.path.abspath('src'))
 import subprocess
 import wave
 import contextlib
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse
 import tempfile
 import uuid
+import csv
 
 # Refresh PATH from Registry (Windows) so the server picks up new winget installations (like ffmpeg) without restarting
 try:
@@ -44,7 +46,7 @@ app.add_middleware(
 )
 
 class AppConfig:
-    SANDBOX_DIR = os.path.abspath("sandbox-user")
+    SANDBOX_DIR = os.path.dirname(os.path.abspath(__file__))
 
     @classmethod
     def get_elan_dir(cls): return os.path.join(cls.SANDBOX_DIR, "processed-elan-files")
@@ -158,7 +160,7 @@ audio_profile_cache = {}
 @app.post("/api/julie_segments")
 def get_julie_segments(req: JulieVADRequest):
     try:
-        from julie.segment_audio import get_energy_profile, segment_audio_from_profile
+        from transcription.audio.segment import get_energy_profile, segment_audio_from_profile
         from pydub import AudioSegment
         
         path = os.path.join(AppConfig.SANDBOX_DIR, req.filename)
@@ -230,12 +232,15 @@ def get_files():
     base_dir = AppConfig.SANDBOX_DIR
     txt_files = []
     wav_files = []
+    csv_files = []
     if not os.path.exists(base_dir):
-        return {"txt_files": [], "wav_files": []}
+        return {"txt_files": [], "wav_files": [], "csv_files": []}
         
     for root, dirs, files in os.walk(base_dir):
-        if any(ignore in root for ignore in ["venv", "node_modules", ".git"]):
-            continue
+        # Prune massive ignored directories in place to prevent os.walk from even entering them
+        dirs[:] = [d for d in dirs if d not in ["venv", "node_modules", ".git", "__pycache__"] and not d.startswith("logs-")]
+        
+
         for f in files:
             rel_path = os.path.relpath(os.path.join(root, f), base_dir).replace("\\", "/")
             lower_f = f.lower()
@@ -243,8 +248,10 @@ def get_files():
                 txt_files.append(rel_path)
             elif lower_f.endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus")):
                 wav_files.append(rel_path)
+            elif lower_f.endswith(".csv"):
+                csv_files.append(rel_path)
                 
-    return {"txt_files": txt_files, "wav_files": wav_files}
+    return {"txt_files": txt_files, "wav_files": wav_files, "csv_files": csv_files}
 
 @app.get("/api/inference_files")
 def get_inference_files():
@@ -254,8 +261,10 @@ def get_inference_files():
         return {"wav_files": []}
         
     for root, dirs, files in os.walk(base_dir):
-        if any(ignore in root for ignore in ["venv", "node_modules", ".git"]):
-            continue
+        # Prune massive ignored directories in place to prevent os.walk from even entering them
+        dirs[:] = [d for d in dirs if d not in ["venv", "node_modules", ".git", "__pycache__"] and not d.startswith("logs-")]
+        
+
         for f in files:
             if f.lower().endswith((".wav", ".mp3", ".mp4", ".m4a", ".flac", ".ogg", ".aac", ".mov", ".avi", ".webm", ".opus")):
                 rel_path = os.path.relpath(os.path.join(root, f), base_dir).replace("\\", "/")
@@ -465,16 +474,14 @@ def get_devices():
 @app.get("/api/checkpoints")
 def get_checkpoints():
     model_dir = AppConfig.get_model_dir()
-    if not os.path.exists(model_dir):
-        return {"checkpoints": []}
-    
     checkpoints = []
-    for d in os.listdir(model_dir):
-        if d.startswith("checkpoint-") and os.path.isdir(os.path.join(model_dir, d)):
-            checkpoints.append(d)
+    if os.path.exists(model_dir):
+        for d in os.listdir(model_dir):
+            if d.startswith("checkpoint-") and os.path.isdir(os.path.join(model_dir, d)):
+                checkpoints.append(d)
     
     checkpoints.sort(key=lambda x: int(x.split("-")[-1]) if x.split("-")[-1].isdigit() else -1, reverse=True)
-    return {"checkpoints": checkpoints}
+    return {"checkpoints": ["charliemcvicker/asr-cherokee"] + checkpoints}
 
 class TrainRequest(BaseModel):
     train_csv: str
@@ -490,7 +497,7 @@ class TrainRequest(BaseModel):
 @app.post("/api/train")
 def train_model(req: TrainRequest):
     cmd = [
-        sys.executable, "run_training.py",
+        sys.executable, os.path.join(AppConfig.SANDBOX_DIR, "scripts", "run_training.py"),
         "--sandbox", AppConfig.SANDBOX_DIR,
         "--train_csv", req.train_csv,
         "--valid_csv", req.valid_csv,
@@ -530,9 +537,15 @@ def transcribe_long(req: TranscribeLongRequest):
         
     out_tsv = os.path.join(AppConfig.SANDBOX_DIR, req.audio_file.rsplit('.', 1)[0] + ".tsv")
     
+    checkpoint_val = req.checkpoint
+    if checkpoint_val != "charliemcvicker/asr-cherokee":
+        checkpoint_val = os.path.join(AppConfig.get_model_dir(), checkpoint_val)
+    
     cmd = [
-        sys.executable, "run_inference_julie.py",
-        audio_path
+        sys.executable, os.path.join(AppConfig.SANDBOX_DIR, "scripts", "run_inference_julie.py"),
+        audio_path,
+        "--checkpoint", checkpoint_val,
+        "--processor", checkpoint_val
     ]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -576,9 +589,15 @@ def transcribe_mic(
     with open(temp_wav, "wb") as f:
         f.write(audio.file.read())
         
+    checkpoint_val = checkpoint
+    if checkpoint_val != "charliemcvicker/asr-cherokee":
+        checkpoint_val = os.path.join(AppConfig.get_model_dir(), checkpoint_val)
+        
     cmd = [
-        sys.executable, "run_inference_julie.py",
-        temp_wav
+        sys.executable, os.path.join(AppConfig.SANDBOX_DIR, "scripts", "run_inference_julie.py"),
+        temp_wav,
+        "--checkpoint", checkpoint_val,
+        "--processor", checkpoint_val
     ]
     
     try:
@@ -624,3 +643,70 @@ def select_folder():
         AppConfig.SANDBOX_DIR = os.path.abspath(selected_folder)
         AppConfig.ensure_dirs()
     return {"folder": AppConfig.SANDBOX_DIR}
+
+@app.get("/api/labeler/data")
+def get_labeler_data(file: str = "data/results/batch_inference_results.csv"):
+    csv_file = os.path.join(AppConfig.SANDBOX_DIR, file)
+    train_file = os.path.join(AppConfig.SANDBOX_DIR, "data", "processed", "train_labeled.csv")
+    
+    if not os.path.exists(csv_file):
+        raise HTTPException(status_code=404, detail=f"File not found: {file}")
+        
+    try:
+        data = []
+        with open(csv_file, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            path_col = "file_path" if "file_path" in reader.fieldnames else "path" if "path" in reader.fieldnames else None
+            txt_col = "greedy_transcription" if "greedy_transcription" in reader.fieldnames else "sentence" if "sentence" in reader.fieldnames else None
+            
+            for row in reader:
+                audio_rel_path = row.get(path_col, "") if path_col else ""
+                
+                # If path is relative like 'sentence_audio/...', fix it so get_audio can find it
+                if audio_rel_path.startswith("sentence_audio/"):
+                    audio_rel_path = f"data/processed/{audio_rel_path}"
+                    
+                data.append({
+                    "file_path": audio_rel_path,
+                    "filename": row.get("filename", os.path.basename(audio_rel_path)),
+                    "greedy_transcription": row.get(txt_col, ""),
+                    "greedy_confidence": float(row.get("greedy_confidence", 0.0)) if row.get("greedy_confidence") else 0.0
+                })
+        
+        # Sort segments by confidence ascending
+        data.sort(key=lambda x: x["greedy_confidence"])
+        
+        labeled_map = {}
+        if os.path.exists(train_file):
+            with open(train_file, mode='r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    labeled_map[row.get("path", "")] = row.get("sentence", "")
+                    
+        for row in data:
+            row["labeled_sentence"] = labeled_map.get(row["file_path"], "")
+            
+        return {"status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class LabelItem(BaseModel):
+    path: str
+    sentence: str
+
+class SaveLabelsRequest(BaseModel):
+    labels: list[LabelItem]
+
+@app.post("/api/labeler/save")
+def save_labels(req: SaveLabelsRequest):
+    train_file = os.path.join(AppConfig.SANDBOX_DIR, "data", "processed", "train_labeled.csv")
+    try:
+        os.makedirs(os.path.dirname(train_file), exist_ok=True)
+        with open(train_file, mode='w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["path", "sentence"])
+            for label in req.labels:
+                writer.writerow([label.path, label.sentence])
+        return {"status": "success", "message": f"Successfully saved {len(req.labels)} labels"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
