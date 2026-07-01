@@ -147,8 +147,38 @@ uv run python colab-script-rips/trainer_w2v2_local.py
 ```zsh
    docker run -it wav2vec2-trainer:local \
       python3 /workspace/trainer_w2v2_local.py \
-        --max-steps 3 \
         --push-to-hub \
         --hub-model-id "charliemcvicker/asr-cherokee" \
         --hub-token "your_hf_write_token"
+```
+
+## Running Inference
+
+You can run speech-to-text inference on a single audio file using the [run_inference.py](file:///Users/charlesmcvicker/code/workshop-transcription/run_inference.py) script.
+
+### Local Inference
+
+Run inference using a local checkpoint and processor:
+
+```bash
+uv run python run_inference.py path/to/audio.wav --checkpoint remote_output_w2v2/checkpoint-800 --processor remote_output_w2v2/wav2vec2-large-xlsr
+```
+
+### Inference from Hugging Face Hub
+
+You can pull the model and processor directly from Hugging Face Hub:
+
+```bash
+uv run python run_inference.py path/to/audio.wav --checkpoint charliemcvicker/asr-cherokee --processor charliemcvicker/asr-cherokee
+```
+
+### Running from a Specific Hugging Face Commit
+
+To run inference using a specific commit hash, branch, or tag (revision) of a model on the Hugging Face Hub, use the `--revision` option:
+
+```bash
+uv run python run_inference.py path/to/audio.wav \
+  --checkpoint username/model-repo \
+  --processor username/model-repo \
+  --revision 4f8263bd3b3b4f62024b45cf350a41d06e23fb4c
 ```
