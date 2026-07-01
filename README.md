@@ -1,184 +1,145 @@
 # Workshop Transcription & Wav2Vec2 Dataset Preparation
 
-This repository contains tools for processing audio transcription files and preparing datasets for training speech recognition models like **Wav2Vec2** or **DeepSpeech**.
+This repository contains tools for processing audio transcription files, segmenting raw recordings, labeling low-confidence predictions, and preparing/training speech recognition models like **Wav2Vec2** locally or in Docker containers.
 
 ## Repository Structure
 
 ```
-.
-├── colab-script-rips/            # Localized training & legacy Google Colab scripts
-│   ├── install_requirements.sh   # Installs workspace dependencies in .venv & compiles KenLM
-│   ├── trainer_w2v2_local.py     # Localized adaptation of Wav2Vec2 trainer (fully offline)
-│   ├── from_elan_to_wav_and_gsheet.py
-│   ├── from_gsheet_to_wav2vec2_files.py
-│   └── trainer_w2v2.py
+workshop-transcription/
+├── src/                          # All Python source code
+│   └── transcription/            # Main package
+│       ├── audio/                # Audio preprocessing and segmentation
+│       │   ├── segment.py        # Hyperparameter sweep / segment evaluation
+│       │   └── extract.py        # Extract audio segments and write manifest
+│       ├── inference/            # Model inference and active labeling
+│       │   ├── single.py         # Run inference on a single audio file
+│       │   ├── batch.py          # Batch inference on a directory of WAVs
+│       │   └── labeler.py        # Web-based interface for low-confidence labeling
+│       ├── training/             # Training, evaluation, and data prep
+│       │   ├── prepare_csv.py    # Prepare training splits from raw CSV
+│       │   ├── train.py          # Offline/local/remote Wav2Vec2 training
+│       │   ├── evaluate_checkpoint.py # Score checkpoint against test set
+│       │   └── evaluate_revisions.py  # Score Git revisions from Hugging Face
+│       └── utils/                # Utilities and checks
+│           ├── tone_normalization.py  # Normalizes tones in transcripts
+│           └── verify_mps.py          # Verifies PyTorch MPS backend support
 │
-├── sentence_audio/               # Folder containing individual segmented audio files (.wav) - (.gitignored)
+├── data/                         # Dedicated data directories
+│   ├── raw/                      # Raw unsegmented audio files and datasets
+│   ├── processed/                # Segmented audio folders and dataset CSV splits
+│   └── results/                  # Inference outputs and evaluation results
 │
-├── sentence_audio.csv            # Source metadata CSV linking audio filenames to transcriptions
-├── local_csv_to_wav2vec2.py      # Main pipeline script: converts local CSV and WAV files to training splits
+├── archive/                      # Installer files and ZIP backups
 │
-├── cim-wav2vec2-train.csv        # Generated training split (path, sentence)
-├── cim-wav2vec2-valid.csv        # Generated validation split (path, sentence)
-├── cim-wav2vec2-test.csv         # Generated test split (path, sentence)
-├── wav2vec2_format.md            # Detailed format specification of the output dataset splits
-└── output_w2v2/                  # Training output artifacts (model checkpoints, ARPA files, results logs)
+└── Dockerfile                    # Container configuration file
 ```
 
 ---
 
 ## Workspace Setup
 
-A virtual environment is managed locally via `uv` for lightning-fast package resolution.
+A virtual environment is managed locally via `uv` or standard Python `venv`.
 
-### 1. Install Dependencies and Build KenLM
-
-Ensure you have `cmake` installed on your machine (`brew install cmake` on macOS). Then, run the installer:
-
-```bash
-./colab-script-rips/install_requirements.sh
-```
-
-This script will:
-
-- Activate your local virtual environment (`.venv`).
-- Install pinning versions of PyTorch (`torchaudio`), Hugging Face `transformers` and `datasets`, evaluation utilities (`jiwer`, `evaluate`), and decoder toolsets.
-- Clone and compile KenLM locally at `colab-script-rips/kenlm/build/bin/lmplz`.
+1. **Activate virtual environment** (e.g. `.venv`).
+2. **Install requirements**: Make sure you have `cmake` and `ffmpeg` installed on your system. Run:
+   ```bash
+   uv pip install -r requirements.txt
+   ```
+3. Set your python path to include `src/`:
+   ```bash
+   export PYTHONPATH="src:${PYTHONPATH}"
+   ```
 
 ---
 
-## Local Dataset Preparation Pipeline
+## Packaged Entrypoints & Main Use Cases
 
-The main script is [local_csv_to_wav2vec2.py](file:///Users/charlesmcvicker/code/workshop-transcription/local_csv_to_wav2vec2.py). It bypasses Google Colab and Google Sheets, processing the dataset locally using the files in your workspace.
+All logic is package-based. Always run commands from the project root directory with `PYTHONPATH=src` (or after exporting it).
 
-### Key Features
+### 1. Audio Segmentation & Extraction
+Analyze audio files to find speaking segments, or extract them into segmented WAV files.
 
-- **Zero Dependencies**: Relies solely on Python's standard library (no `pandas` or `numpy` installation needed).
-- **Metadata Extraction**: Reads the WAV file headers directly to verify existence and extract durations and file sizes.
-- **Normalization**: Standardizes transcripts by removing punctuation/extra formatting (including asterisks `*`) and downcasing.
-- **Duration Filtering**: Automatically drops long audio clips that could exceed GPU memory limits during training.
-- **Shuffled Splits**: Shuffles the dataset deterministically with a random seed and partitions it into Train, Validation, and Test subsets.
-- **Relative Path Output**: Keeps the file paths relative (e.g. `sentence_audio/FILENAME.wav`) so the dataset splits can be easily loaded in downstream trainers.
+- **Evaluate segmentation settings (Hyperparameter Sweep)**:
+  ```bash
+  python3 -m transcription.audio.segment data/raw/Bessie-Summerfield.wav --sweep
+  ```
+- **Extract segments to disk**:
+  ```bash
+  python3 -m transcription.audio.extract data/raw/Bessie-Summerfield.wav --out-dir data/processed/segments
+  ```
 
-### Usage
-
-Run the script from the project root:
-
+### 2. Dataset Preparation
+Split your local CSV dataset and WAV directory into Train, Validation, and Test partitions.
 ```bash
-./local_csv_to_wav2vec2.py [options]
+python3 -m transcription.training.prepare_csv \
+  --csv data/processed/sentence_audio.csv \
+  --audio-dir data/processed/sentence_audio \
+  --output-prefix data/processed/cim-wav2vec2
 ```
 
-### Options
+### 3. Local Model Training
+Train the Wav2Vec2 model offline.
+```bash
+python3 -m transcription.training.train \
+  --train-csv data/processed/cim-wav2vec2-train.csv \
+  --valid-csv data/processed/cim-wav2vec2-valid.csv \
+  --test-csv data/processed/cim-wav2vec2-test.csv \
+  --audio-dir data/processed/sentence_audio \
+  --output-dir output_w2v2 \
+  --epochs 50
+```
 
+### 4. Running Inference
+- **Single file inference**:
+  ```bash
+  python3 -m transcription.inference.single data/raw/Bessie-Summerfield-2.wav \
+    --checkpoint charliemcvicker/asr-cherokee
+  ```
+- **Batch inference on a directory**:
+  ```bash
+  python3 -m transcription.inference.batch data/processed/segments \
+    --checkpoint charliemcvicker/asr-cherokee \
+    --output data/results/batch_inference_results.csv
+  ```
+
+### 5. Web-based Active Labeler
+Run a local labeling UI to manually review and label low-confidence audio segments:
+```bash
+python3 -m transcription.inference.labeler --port 8000
 ```
-options:
-  -h, --help            show this help message and exit
-  --csv CSV             Path to the input CSV file containing metadata
-                        (default: sentence_audio.csv)
-  --audio-dir AUDIO_DIR
-                        Path to the directory containing audio files (default:
-                        sentence_audio)
-  --text-col TEXT_COL   Column name in the CSV to use for transcription text
-                        (default: phonetic)
-  --output-prefix OUTPUT_PREFIX
-                        Prefix for the generated train/valid/test split CSV
-                        files (default: cim-wav2vec2)
-  --max-duration MAX_DURATION
-                        Maximum audio duration (seconds) to include in the
-                        splits (default: 15.0)
-  --split SPLIT SPLIT SPLIT
-                        Train, Validation, and Test split percentages summing
-                        to 100 (default: 80 10 10)
-  --seed SEED           Random seed for reproducibility when shuffling dataset
-                        (default: 42)
-```
+Then visit `http://localhost:8000/` in your browser. It automatically pulls data from `data/results/batch_inference_results.csv` and saves human-labeled transcripts to `data/processed/train_labeled.csv`.
+
+### 6. Model Evaluation
+- **Evaluate local checkpoint**:
+  ```bash
+  python3 -m transcription.training.evaluate_checkpoint \
+    --test-csv data/processed/cim-wav2vec2-test.csv \
+    --audio-dir data/processed/sentence_audio \
+    --checkpoint remote_output_w2v2/checkpoint-800
+  ```
+- **Evaluate multiple Hugging Face commits/revisions**:
+  ```bash
+  python3 -m transcription.training.evaluate_revisions \
+    --revisions-csv data/results/revisions_to_test.tsv \
+    --test-csv data/processed/cim-wav2vec2-test.csv \
+    --audio-dir data/processed/sentence_audio \
+    --output-csv data/results/revision_scores.csv
+  ```
 
 ---
 
-## Localized Model Training
+## Docker Execution
 
-The script [trainer_w2v2_local.py](file:///Users/charlesmcvicker/code/workshop-transcription/colab-script-rips/trainer_w2v2_local.py) allows offline, local training of the speech-to-text pipeline.
+The project contains a prebaked Docker image that compiles KenLM, installs all PyTorch/CUDA dependencies, and downloads the base model checkpoint.
 
-### Steps Undertaken in Training
-
-1. **Pre-processing**: Reads the local train, validation, and test CSV files.
-2. **Vocabulary Building**: Analyzes character frequency across the dataset and writes `vocab.json`.
-3. **Language Modeling**: Feeds the dataset transcripts into `lmplz` to generate a 4-gram ARPA language model. It corrects ARPA formatting so it is fully compatible with `pyctcdecode`.
-4. **HuggingFace Dataset mapping**: Resolves file path mappings to sound clip structures correctly.
-5. **Fine-Tuning**: Trains the XLS-R model using the HuggingFace `Trainer`.
-6. **Decoding Evaluation**: Runs evaluations on all saved checkpoints, comparing greedy CTC search vs. KenLM language-model-guided search, and promotes the best model checkpoint.
-
-### Running the Trainer
-
-To run the training script:
+To run a container and mount your workspace for training (with Hugging Face authentication to push results):
 
 ```bash
-uv run python colab-script-rips/trainer_w2v2_local.py
-```
-
-_Note for Apple Silicon Users:_
-If you are using the default stable PyTorch release, the MPS backend does not natively support the `ctc_loss` operator, requiring you to enable CPU fallback:
-
-```bash
-PYTORCH_ENABLE_MPS_FALLBACK=1 uv run python colab-script-rips/trainer_w2v2_local.py
-```
-
-However, if you have installed **PyTorch Nightly** (specifically version `2.14.0.dev20260630` or newer), native MPS acceleration is supported for CTC loss out-of-the-box, allowing you to run training fully on your GPU without the CPU fallback environment variable:
-
-```bash
-uv run python colab-script-rips/trainer_w2v2_local.py
-```
-
-## What to run on VM
-
-```zsh
-  python3 /workspace/trainer_w2v2_local.py \
-      --train-csv /workspace/cim-wav2vec2-train.csv \
-      --valid-csv /workspace/cim-wav2vec2-valid.csv \
-      --test-csv /workspace/cim-wav2vec2-test.csv \
-      --audio-dir /workspace/sentence_audio \
-      --output-dir /workspace/output_w2v2 \
-      --lmplz-path lmplz \
-      --push-to-hub \
-      --hub-model-id "charliemcvicker/asr-cherokee" \
-      --hub-token "your_hf_write_token"
-```
-
-```zsh
-   docker run -it wav2vec2-trainer:local \
-      python3 /workspace/trainer_w2v2_local.py \
-        --push-to-hub \
-        --hub-model-id "charliemcvicker/asr-cherokee" \
-        --hub-token "your_hf_write_token"
-```
-
-## Running Inference
-
-You can run speech-to-text inference on a single audio file using the [run_inference.py](file:///Users/charlesmcvicker/code/workshop-transcription/run_inference.py) script.
-
-### Local Inference
-
-Run inference using a local checkpoint and processor:
-
-```bash
-uv run python run_inference.py path/to/audio.wav --checkpoint remote_output_w2v2/checkpoint-800 --processor remote_output_w2v2/wav2vec2-large-xlsr
-```
-
-### Inference from Hugging Face Hub
-
-You can pull the model and processor directly from Hugging Face Hub:
-
-```bash
-uv run python run_inference.py path/to/audio.wav --checkpoint charliemcvicker/asr-cherokee --processor charliemcvicker/asr-cherokee
-```
-
-### Running from a Specific Hugging Face Commit
-
-To run inference using a specific commit hash, branch, or tag (revision) of a model on the Hugging Face Hub, use the `--revision` option:
-
-```bash
-uv run python run_inference.py path/to/audio.wav \
-  --checkpoint username/model-repo \
-  --processor username/model-repo \
-  --revision 4f8263bd3b3b4f62024b45cf350a41d06e23fb4c
+docker run --gpus all \
+  -v $(pwd):/workspace \
+  -e HF_TOKEN="your_hugging_face_token" \
+  <image_name> \
+  python3 -m transcription.training.train \
+    --push-to-hub \
+    --hub-model-id "your-username/asr-cherokee"
 ```
