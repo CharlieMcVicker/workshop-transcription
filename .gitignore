@@ -5,5 +5,18 @@ elan installers/
 
 # cherokee audio data
 sentence_audio
+sentence_audio.zip
 
-.DS_Storecolab-script-rips/kenlm/
+.DS_Store
+.venv/
+__pycache__/
+*/__pycache__/
+
+# training artifacts
+output_w2v2/
+
+# local script helper files
+steps-isolated-cuda-asr.txt
+
+# sub-repos
+colab-script-rips/kenlm/
