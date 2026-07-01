@@ -1,3 +1,45 @@
+.ember
+
+# workshop files
+data/raw/bribri-audio-files-asr-exercise/
+data/raw/cim-audio-files-asr-exercise/
+archive/elan installers/
+
+# cherokee audio data
+data/processed/sentence_audio
+archive/sentence_audio.zip
+
+.DS_Store
+.venv/
+__pycache__/
+*/__pycache__/
+
+# training artifacts
+output_w2v2/
+
+# local script helper files
+steps-isolated-cuda-asr.txt
+
+# sub-repos
+colab-script-rips/kenlm/
+
+# audio files and archives
+data/raw/*.wav
+archive/*.zip
+*.zip
+
+# training outputs
+remote_output_w2v2/
+
+# log files
+run*.txt
+data/results/test_inference_results.csv
+data/results/batch_inference_results.csv
+
+# segment output directories
+data/processed/segments/
+data/processed/charlie_segments/
+
 # Model directories & checkpoints
 pretrained_models/
 **/pretrained_models/

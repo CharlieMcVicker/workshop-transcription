@@ -129,9 +129,8 @@ def replace_tones(text):
                         # Fallback for unexpected sequences
                         replacement = seq_str
                 else:
-                    # Non-word-final vowel with no mark gets UNMARKED_VAL
-                    if is_non_final:
-                        replacement = UNMARKED_VAL
+                    # Both non-word-final and word-final vowels with no mark get UNMARKED_VAL
+                    replacement = UNMARKED_VAL
 
                 new_word.append(char + replacement)
                 i = j

@@ -57,6 +57,7 @@ A virtual environment is managed locally via `uv` or standard Python `venv`.
 All logic is package-based. Always run commands from the project root directory with `PYTHONPATH=src` (or after exporting it).
 
 ### 1. Audio Segmentation & Extraction
+
 Analyze audio files to find speaking segments, or extract them into segmented WAV files.
 
 - **Evaluate segmentation settings (Hyperparameter Sweep)**:
@@ -69,7 +70,9 @@ Analyze audio files to find speaking segments, or extract them into segmented WA
   ```
 
 ### 2. Dataset Preparation
+
 Split your local CSV dataset and WAV directory into Train, Validation, and Test partitions.
+
 ```bash
 python3 -m transcription.training.prepare_csv \
   --csv data/processed/sentence_audio.csv \
@@ -78,7 +81,9 @@ python3 -m transcription.training.prepare_csv \
 ```
 
 ### 3. Local Model Training
+
 Train the Wav2Vec2 model offline.
+
 ```bash
 python3 -m transcription.training.train \
   --train-csv data/processed/cim-wav2vec2-train.csv \
@@ -90,6 +95,7 @@ python3 -m transcription.training.train \
 ```
 
 ### 4. Running Inference
+
 - **Single file inference**:
   ```bash
   python3 -m transcription.inference.single data/raw/Bessie-Summerfield-2.wav \
@@ -103,13 +109,17 @@ python3 -m transcription.training.train \
   ```
 
 ### 5. Web-based Active Labeler
+
 Run a local labeling UI to manually review and label low-confidence audio segments:
+
 ```bash
 python3 -m transcription.inference.labeler --port 8000
 ```
+
 Then visit `http://localhost:8000/` in your browser. It automatically pulls data from `data/results/batch_inference_results.csv` and saves human-labeled transcripts to `data/processed/train_labeled.csv`.
 
 ### 6. Model Evaluation
+
 - **Evaluate local checkpoint**:
   ```bash
   python3 -m transcription.training.evaluate_checkpoint \
@@ -141,5 +151,5 @@ docker run --gpus all \
   <image_name> \
   python3 -m transcription.training.train \
     --push-to-hub \
-    --hub-model-id "your-username/asr-cherokee"
+    --hub-model-id "charliemcvicker/asr-cherokee"
 ```
