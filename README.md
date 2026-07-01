@@ -143,3 +143,12 @@ uv run python colab-script-rips/trainer_w2v2_local.py
       --hub-model-id "charliemcvicker/asr-cherokee" \
       --hub-token "your_hf_write_token"
 ```
+
+```zsh
+   docker run -it wav2vec2-trainer:local \
+      python3 /workspace/trainer_w2v2_local.py \
+        --max-steps 3 \
+        --push-to-hub \
+        --hub-model-id "charliemcvicker/asr-cherokee" \
+        --hub-token "your_hf_write_token"
+```

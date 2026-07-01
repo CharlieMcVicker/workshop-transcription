@@ -57,4 +57,8 @@ COPY cim-wav2vec2-test.csv /workspace/cim-wav2vec2-test.csv
 COPY sentence_audio /workspace/sentence_audio
 COPY colab-script-rips/trainer_w2v2_local.py /workspace/trainer_w2v2_local.py
 
+# Pre-download the base XLS-R model checkpoint to cache it in the image
+RUN python3 -c "from transformers import Wav2Vec2ForCTC; Wav2Vec2ForCTC.from_pretrained('facebook/wav2vec2-large-xlsr-53')"
+
+
 
