@@ -1,11 +1,11 @@
 ---
 id: TASK-60
 title: Merge upstream/main into charlie-latest branch
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-07-01 23:35'
-updated_date: '2026-07-01 23:35'
+updated_date: '2026-07-01 23:36'
 labels: []
 dependencies: []
 ordinal: 60000
@@ -19,6 +19,12 @@ Merge the main branch of the upstream repository (git@github.com:lily-bel/cherok
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Merge upstream/main into charlie-latest branch
-- [ ] #2 Resolve any conflicts if they arise
+- [x] #1 Merge upstream/main into charlie-latest branch
+- [x] #2 Resolve any conflicts if they arise
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Successfully merged upstream/main into the local charlie-latest branch. Resolved conflicts in .gitignore, README.md, data CSVs, and several Python files in favor of local changes, and pushed the merge commit to upstream.
+<!-- SECTION:FINAL_SUMMARY:END -->
