@@ -4,6 +4,7 @@
 batch_inference.py
 
 Runs speech-to-text inference on a directory of WAV files using the fine-tuned Wav2Vec2 model.
+Optimized using batched GPU inference and multiprocessed CPU CTC/KenLM decoding.
 """
 
 import os
@@ -20,12 +21,100 @@ import torch
 import torchaudio
 import soundfile as sf
 import numpy as np
-from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC, Wav2Vec2ProcessorWithLM
-from pyctcdecode import build_ctcdecoder
-
+from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 import time
+import multiprocessing
 
 TARGET_SAMPLE_RATE = 16000
+
+# Global variables in the worker processes to avoid serializing the decoder/processor objects
+global_decoder = None
+global_processor = None
+
+
+def init_worker(processor_path, arpa_path, token, revision):
+    """
+    Initialize global decoder and processor in worker processes once.
+    This avoids pickle serialization overhead and limits thread subscription.
+    """
+    global global_decoder, global_processor
+    # Restrict internal Torch threading in workers to prevent CPU oversubscription
+    torch.set_num_threads(1)
+    
+    from transformers import Wav2Vec2Processor
+    from pyctcdecode import build_ctcdecoder
+    import os
+
+    global_processor = Wav2Vec2Processor.from_pretrained(
+        processor_path, token=token, revision=revision
+    )
+
+    if arpa_path and os.path.exists(arpa_path):
+        vocab_dict_sorted = global_processor.tokenizer.get_vocab()
+        sorted_vocab = sorted(vocab_dict_sorted.items(), key=lambda kv: kv[1])
+        labels = [t for t, _ in sorted_vocab]
+        labels = ["" if t == "[PAD]" else (" " if t == "|" else t) for t in labels]
+
+        global_decoder = build_ctcdecoder(
+            labels=labels,
+            kenlm_model_path=arpa_path,
+            alpha=0.5,
+            beta=1.0,
+        )
+
+
+def decode_worker(item_data):
+    """
+    Worker function to decode logits.
+    item_data is a tuple: (index, filename, audio_path, logits_np)
+    """
+    global global_decoder, global_processor
+    import numpy as np
+    import torch
+    
+    idx, filename, audio_path, logits_np = item_data
+    
+    # 1. Greedy Decode
+    logits_tensor = torch.tensor(logits_np)
+    probs = torch.nn.functional.softmax(logits_tensor, dim=-1).numpy()
+    pred_ids = np.argmax(probs, axis=-1)
+    greedy_raw = global_processor.decode(pred_ids).strip()
+
+    # Calculate token level confidence
+    token_probs = probs[np.arange(len(pred_ids)), pred_ids]
+    pad_id = getattr(global_processor.tokenizer, "pad_token_id", None)
+    if pad_id is None:
+        pad_id = global_processor.tokenizer.vocab.get("[PAD]", 0)
+    
+    non_pad_mask = pred_ids != pad_id
+    if non_pad_mask.any():
+        greedy_confidence = float(np.mean(token_probs[non_pad_mask]))
+    else:
+        greedy_confidence = float(np.mean(token_probs))
+
+    # 2. KenLM Decode
+    lm_raw = ""
+    logit_score = 0.0
+    combined_score = 0.0
+    
+    if global_decoder is not None:
+        beams = global_decoder.decode_beams(logits_np)
+        if beams:
+            best_beam = beams[0]
+            lm_raw = best_beam[0].strip()
+            logit_score = float(best_beam[3])
+            combined_score = float(best_beam[4])
+
+    return {
+        "index": idx,
+        "filename": filename,
+        "audio_path": audio_path,
+        "greedy_raw": greedy_raw,
+        "greedy_confidence": greedy_confidence,
+        "lm_raw": lm_raw,
+        "logit_score": logit_score,
+        "combined_score": combined_score
+    }
 
 
 def main():
@@ -72,6 +161,18 @@ def main():
         type=str,
         default="batch_inference_results.csv",
         help="Path to the output CSV file to save results.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size for GPU forward pass (default: 16).",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=None,
+        help="Number of worker processes for parallel decoding (default: CPU count).",
     )
     args = parser.parse_args()
 
@@ -128,34 +229,131 @@ def main():
     print(f"Using device: {device}", flush=True)
     model.to(device)
 
-    # Initialize decoder if KenLM is requested
-    decoder = None
-    processor_with_lm = None
-    if args.arpa:
-        if os.path.exists(args.arpa):
-            print(f"Building CTC decoder using KenLM ARPA model from {args.arpa}...", flush=True)
-            vocab_dict_sorted = processor.tokenizer.get_vocab()
-            sorted_vocab = sorted(vocab_dict_sorted.items(), key=lambda kv: kv[1])
-            labels = [t for t, _ in sorted_vocab]
-            labels = ["" if t == "[PAD]" else (" " if t == "|" else t) for t in labels]
+    # Load and resample audio files (pre-load in memory for batching/sorting)
+    # We sort by length to minimize padding overhead during batched inference.
+    loaded_audios = []
+    print("Loading and preparing audio files in memory...", flush=True)
+    audio_load_start = time.time()
+    for audio_path in wav_files:
+        filename = os.path.basename(audio_path)
+        try:
+            speech_array, sample_rate = sf.read(audio_path)
+            waveform = torch.tensor(speech_array, dtype=torch.float32)
+            if len(waveform.shape) == 1:
+                waveform = waveform.unsqueeze(0)
+            else:
+                waveform = waveform.transpose(0, 1)
+            
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+            
+            if sample_rate != TARGET_SAMPLE_RATE:
+                resampler = torchaudio.transforms.Resample(
+                    orig_freq=sample_rate, new_freq=TARGET_SAMPLE_RATE
+                )
+                waveform = resampler(waveform)
+            
+            speech = waveform.squeeze(0).numpy()
+            loaded_audios.append({
+                "audio_path": audio_path,
+                "filename": filename,
+                "speech": speech,
+                "length": len(speech)
+            })
+        except Exception as e:
+            print(f"Error loading {filename}: {e}", flush=True)
 
-            decoder = build_ctcdecoder(
-                labels=labels,
-                kenlm_model_path=args.arpa,
-                alpha=0.5,
-                beta=1.0,
-            )
-            processor_with_lm = Wav2Vec2ProcessorWithLM(
-                feature_extractor=processor.feature_extractor,
-                tokenizer=processor.tokenizer,
-                decoder=decoder,
-            )
-        else:
-            print(f"Warning: ARPA model '{args.arpa}' not found. Skipping KenLM decoding.", flush=True)
+    if not loaded_audios:
+        print("No audio files successfully loaded. Exiting.", flush=True)
+        sys.exit(0)
 
-    # Write headers to CSV output file immediately
+    # Sort by length
+    loaded_audios.sort(key=lambda x: x["length"])
+    print(f"Successfully loaded {len(loaded_audios)} files in {time.time() - audio_load_start:.2f}s.", flush=True)
+
+    # Create batches
+    batches = [loaded_audios[i : i + args.batch_size] for i in range(0, len(loaded_audios), args.batch_size)]
+    
+    # Store logits data for multiprocessing
+    # Items: (global_index, filename, audio_path, logits_np)
+    logits_data = []
+    global_idx = 0
+
+    gpu_start_time = time.time()
+    print(f"Running batched GPU inference (batch size: {args.batch_size}, total batches: {len(batches)})...", flush=True)
+    for batch_idx, batch in enumerate(batches, 1):
+        speech_list = [item["speech"] for item in batch]
+        
+        inputs = processor(
+            speech_list,
+            sampling_rate=TARGET_SAMPLE_RATE,
+            padding=True,
+            return_tensors="pt"
+        )
+        input_values = inputs.input_values.to(device)
+        attention_mask = getattr(inputs, "attention_mask", None)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+
+        try:
+            with torch.no_grad():
+                if attention_mask is not None:
+                    batch_logits = model(input_values, attention_mask=attention_mask).logits
+                else:
+                    batch_logits = model(input_values).logits
+        except NotImplementedError as e:
+            if device == "mps":
+                print("  MPS execution failed. Falling back to CPU backend for this batch...", flush=True)
+                device = "cpu"
+                model.to(device)
+                input_values = input_values.to(device)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+                with torch.no_grad():
+                    if attention_mask is not None:
+                        batch_logits = model(input_values, attention_mask=attention_mask).logits
+                    else:
+                        batch_logits = model(input_values).logits
+            else:
+                raise e
+
+        # Extract and unpad logits for each item
+        for item_idx, item in enumerate(batch):
+            input_len = len(item["speech"])
+            logit_len = int(model._get_feat_extract_output_lengths(input_len))
+            logits_np = batch_logits[item_idx, :logit_len].cpu().numpy()
+            logits_data.append((global_idx, item["filename"], item["audio_path"], logits_np))
+            global_idx += 1
+
+    print(f"GPU inference completed in {time.time() - gpu_start_time:.2f}s.", flush=True)
+
+    # Initialize multiprocessing Pool for parallel decoding
+    num_workers = args.num_workers or multiprocessing.cpu_count()
+    print(f"Initializing multiprocessing pool with {num_workers} workers...", flush=True)
+    
+    # Initialize child processes by loading processor and CTC decoder (ARPA) once per worker
+    pool = multiprocessing.Pool(
+        processes=num_workers,
+        initializer=init_worker,
+        initargs=(args.processor, args.arpa, token, args.revision)
+    )
+
+    print(f"Starting parallel decoding of {len(logits_data)} items...", flush=True)
+    decode_start_time = time.time()
+    
+    results = pool.map(decode_worker, logits_data)
+    pool.close()
+    pool.join()
+    
+    print(f"Decoding completed in {time.time() - decode_start_time:.2f}s.", flush=True)
+
+    # Sort results back to original directory reading order
+    wav_order = {path: idx for idx, path in enumerate(wav_files)}
+    results.sort(key=lambda x: wav_order.get(x["audio_path"], 0))
+
+    # Write results to CSV
     headers = ["file_path", "filename", "greedy_transcription", "greedy_confidence"]
-    if processor_with_lm:
+    if args.arpa:
         headers.append("kenlm_transcription")
         headers.append("kenlm_logit_score")
         headers.append("kenlm_combined_score")
@@ -163,115 +361,13 @@ def main():
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
+        for res in results:
+            row = [res["audio_path"], res["filename"], res["greedy_raw"], f"{res['greedy_confidence']:.4f}"]
+            if args.arpa:
+                row.extend([res["lm_raw"], f"{res['logit_score']:.4f}", f"{res['combined_score']:.4f}"])
+            writer.writerow(row)
 
-    start_time = time.time()
-    durations = []
-
-    for i, audio_path in enumerate(wav_files, 1):
-        filename = os.path.basename(audio_path)
-        item_start = time.time()
-
-        try:
-            # Load audio using soundfile
-            speech_array, sample_rate = sf.read(audio_path)
-
-            # Convert numpy array (frames, channels) -> torch tensor (channels, frames)
-            waveform = torch.tensor(speech_array, dtype=torch.float32)
-            if len(waveform.shape) == 1:
-                waveform = waveform.unsqueeze(0)  # (1, frames)
-            else:
-                waveform = waveform.transpose(0, 1)  # (channels, frames)
-
-            # Convert to mono if multi-channel
-            if waveform.shape[0] > 1:
-                waveform = torch.mean(waveform, dim=0, keepdim=True)
-
-            # Resample if needed
-            if sample_rate != TARGET_SAMPLE_RATE:
-                resampler = torchaudio.transforms.Resample(
-                    orig_freq=sample_rate, new_freq=TARGET_SAMPLE_RATE
-                )
-                waveform = resampler(waveform)
-
-            # Squeeze to 1D
-            speech = waveform.squeeze(0).numpy()
-
-            # Feature extraction
-            input_values = processor(speech, sampling_rate=TARGET_SAMPLE_RATE).input_values[0]
-            input_tensor = torch.tensor(np.array([input_values])).to(device)
-
-            # Model inference with device safety/fallback
-            try:
-                with torch.no_grad():
-                    logits = model(input_tensor).logits
-            except NotImplementedError as e:
-                if device == "mps":
-                    print(f"  MPS execution failed due to unsupported operators: {e}", flush=True)
-                    print("  Falling back to CPU backend for this file...", flush=True)
-                    device = "cpu"
-                    model.to(device)
-                    input_tensor = input_tensor.to(device)
-                    with torch.no_grad():
-                        logits = model(input_tensor).logits
-                else:
-                    raise e
-
-            logits_np = logits.squeeze(0).cpu().numpy()
-
-            # Softmax to get confidence probabilities
-            probs = torch.nn.functional.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
-            pred_ids = np.argmax(probs, axis=-1)
-            greedy_raw = processor.decode(pred_ids).strip()
-
-            # Calculate token level confidence
-            token_probs = probs[np.arange(len(pred_ids)), pred_ids]
-            pad_id = getattr(processor.tokenizer, "pad_token_id", None)
-            if pad_id is None:
-                pad_id = processor.tokenizer.vocab.get("[PAD]", 0)
-            
-            non_pad_mask = pred_ids != pad_id
-            if non_pad_mask.any():
-                greedy_confidence = float(np.mean(token_probs[non_pad_mask]))
-            else:
-                greedy_confidence = float(np.mean(token_probs))
-
-            row = [audio_path, filename, greedy_raw, f"{greedy_confidence:.4f}"]
-
-            # KenLM decode
-            if processor_with_lm:
-                beams = processor_with_lm.decoder.decode_beams(logits_np)
-                if beams:
-                    best_beam = beams[0]
-                    lm_raw = best_beam[0].strip()
-                    logit_score = float(best_beam[3])
-                    combined_score = float(best_beam[4])
-                else:
-                    lm_raw = ""
-                    logit_score = 0.0
-                    combined_score = 0.0
-                
-                row.extend([lm_raw, f"{logit_score:.4f}", f"{combined_score:.4f}"])
-
-            # Append to CSV output file
-            with open(args.output, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(row)
-
-            duration = time.time() - item_start
-            durations.append(duration)
-            avg_duration = sum(durations) / len(durations)
-            remaining = len(wav_files) - i
-            eta = remaining * avg_duration
-            
-            print(f"[{i}/{len(wav_files)}] {filename} ({duration:.2f}s, avg: {avg_duration:.2f}s, ETA: {eta:.1f}s)", flush=True)
-            print(f"  Greedy: {greedy_raw} (Confidence: {greedy_confidence:.4f})", flush=True)
-            if processor_with_lm:
-                print(f"  KenLM:  {lm_raw} (Logit: {logit_score:.4f}, Combined: {combined_score:.4f})", flush=True)
-
-        except Exception as e:
-            print(f"Error processing {filename}: {e}", flush=True)
-
-    total_time = time.time() - start_time
+    total_time = time.time() - audio_load_start
     print(f"\nBatch processing complete in {total_time:.2f}s. Results saved to {args.output}", flush=True)
 
 
