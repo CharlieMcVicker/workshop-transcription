@@ -55,4 +55,6 @@ COPY cim-wav2vec2-train.csv /workspace/cim-wav2vec2-train.csv
 COPY cim-wav2vec2-valid.csv /workspace/cim-wav2vec2-valid.csv
 COPY cim-wav2vec2-test.csv /workspace/cim-wav2vec2-test.csv
 COPY sentence_audio /workspace/sentence_audio
+COPY colab-script-rips/trainer_w2v2_local.py /workspace/trainer_w2v2_local.py
+
 
