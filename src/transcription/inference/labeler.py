@@ -9,8 +9,8 @@ import sys
 import argparse
 
 PORT = 8000
-CSV_FILE = "batch_inference_results.csv"
-TRAIN_FILE = "train_labeled.csv"
+CSV_FILE = "data/results/batch_inference_results.csv"
+TRAIN_FILE = "data/processed/train_labeled.csv"
 
 # Custom HTTP request handler
 class LabelingToolHandler(http.server.SimpleHTTPRequestHandler):
@@ -692,8 +692,9 @@ def main():
     parser.add_argument("--port", type=int, default=PORT, help="Port to listen on")
     args = parser.parse_args()
 
-    # Change to root dir containing script
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    # Change to repo root directory so that relative paths resolve correctly
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+    os.chdir(repo_root)
 
     # Start server
     handler = LabelingToolHandler

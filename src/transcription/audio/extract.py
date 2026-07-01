@@ -77,7 +77,7 @@ def segment_audio_from_profile(dbfs_profile, total_duration_ms, step_ms=10, min_
 def main():
     parser = argparse.ArgumentParser(description="Extract audio segments and write a manifest JSON.")
     parser.add_argument("audio_path", help="Path to input audio file")
-    parser.add_argument("--out-dir", default="segments", help="Directory to save extracted segments (default: segments)")
+    parser.add_argument("--out-dir", default="data/processed/segments", help="Directory to save extracted segments (default: data/processed/segments)")
     parser.add_argument("--thresh", type=int, default=-30, help="Silence threshold in dBFS (default: -30)")
     parser.add_argument("--min-silence", type=int, default=500, help="Minimum silence length in ms (default: 500)")
     parser.add_argument("--keep-silence", type=int, default=200, help="Keep silence padding in ms (default: 200)")

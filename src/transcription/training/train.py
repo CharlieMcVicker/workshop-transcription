@@ -39,10 +39,10 @@ chars_to_remove_regex = r"[\,\?\.\!\-\;\:\"\“\%\”\\(\)\[\]\{\}«»…]"
 
 # CONFIGURATION DICTIONARY
 CONFIG = {
-    "train_csv": "cim-wav2vec2-train.csv",
-    "valid_csv": "cim-wav2vec2-valid.csv",
-    "test_csv": "cim-wav2vec2-test.csv",
-    "audio_dir": "sentence_audio",
+    "train_csv": "data/processed/cim-wav2vec2-train.csv",
+    "valid_csv": "data/processed/cim-wav2vec2-valid.csv",
+    "test_csv": "data/processed/cim-wav2vec2-test.csv",
+    "audio_dir": "data/processed/sentence_audio",
     "output_dir": "output_w2v2",
     "base_checkpoint": "facebook/wav2vec2-large-xlsr-53",
     "asr_lang": "cim",
@@ -242,7 +242,7 @@ def main():
     CONFIG["max_steps"] = args.max_steps
     CONFIG["push_to_hub"] = args.push_to_hub
     CONFIG["hub_model_id"] = args.hub_model_id
-    CONFIG["hub_token"] = args.hub_token
+    CONFIG["hub_token"] = args.hub_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
     if CONFIG["push_to_hub"]:
         import datetime

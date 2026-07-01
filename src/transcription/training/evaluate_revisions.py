@@ -20,8 +20,8 @@ from pyctcdecode import build_ctcdecoder
 from jiwer import wer as jiwer_wer, cer as jiwer_cer
 from tqdm import tqdm
 
-# Import helper functions from evaluate_checkpoint if possible, otherwise redefine
-from evaluate_checkpoint import (
+# Import helper functions from evaluate_checkpoint
+from transcription.training.evaluate_checkpoint import (
     normalize_text,
     strip_tones,
     _try_read_csv,
@@ -35,12 +35,12 @@ def safe(s):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate multiple model revisions on a test dataset.")
-    parser.add_argument("--revisions-csv", type=str, default="revisions_to_test.tsv", help="Path to TSV or CSV listing revisions.")
-    parser.add_argument("--test-csv", type=str, default="cim-wav2vec2-test.csv", help="Path to the test CSV file.")
-    parser.add_argument("--audio-dir", type=str, default="sentence_audio", help="Directory containing audio files.")
+    parser.add_argument("--revisions-csv", type=str, default="data/results/revisions_to_test.tsv", help="Path to TSV or CSV listing revisions.")
+    parser.add_argument("--test-csv", type=str, default="data/processed/cim-wav2vec2-test.csv", help="Path to the test CSV file.")
+    parser.add_argument("--audio-dir", type=str, default="data/processed/sentence_audio", help="Directory containing audio files.")
     parser.add_argument("--checkpoint", type=str, default="charliemcvicker/asr-cherokee", help="Hugging Face repo ID to the model checkpoint.")
     parser.add_argument("--arpa", type=str, default="output_w2v2/lm-cim-4-correct.arpa", help="Path to KenLM ARPA model.")
-    parser.add_argument("--output-csv", type=str, default="revision_scores.csv", help="Output path for the scoring CSV.")
+    parser.add_argument("--output-csv", type=str, default="data/results/revision_scores.csv", help="Output path for the scoring CSV.")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face Hub authentication token.")
     args = parser.parse_args()
 

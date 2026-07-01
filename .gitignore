@@ -1,13 +1,13 @@
 .ember
 
 # workshop files
-bribri-audio-files-asr-exercise/
-cim-audio-files-asr-exercise/
-elan installers/
+data/raw/bribri-audio-files-asr-exercise/
+data/raw/cim-audio-files-asr-exercise/
+archive/elan installers/
 
 # cherokee audio data
-sentence_audio
-sentence_audio.zip
+data/processed/sentence_audio
+archive/sentence_audio.zip
 
 .DS_Store
 .venv/
@@ -24,7 +24,8 @@ steps-isolated-cuda-asr.txt
 colab-script-rips/kenlm/
 
 # audio files and archives
-*.wav
+data/raw/*.wav
+archive/*.zip
 *.zip
 
 # training outputs
@@ -32,10 +33,9 @@ remote_output_w2v2/
 
 # log files
 run*.txt
-test_inference_results.csv
+data/results/test_inference_results.csv
+data/results/batch_inference_results.csv
 
 # segment output directories
-segments/
-charlie_segments/
-
-
+data/processed/segments/
+data/processed/charlie_segments/

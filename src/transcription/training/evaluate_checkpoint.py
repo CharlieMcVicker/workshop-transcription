@@ -75,8 +75,8 @@ def _resolve_audio_path(p, dataset_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate a Wav2Vec2 checkpoint on a test dataset.")
-    parser.add_argument("--test-csv", type=str, default="cim-wav2vec2-test.csv", help="Path to the test CSV file.")
-    parser.add_argument("--audio-dir", type=str, default="sentence_audio", help="Directory containing audio files.")
+    parser.add_argument("--test-csv", type=str, default="data/processed/cim-wav2vec2-test.csv", help="Path to the test CSV file.")
+    parser.add_argument("--audio-dir", type=str, default="data/processed/sentence_audio", help="Directory containing audio files.")
     parser.add_argument("--checkpoint", type=str, default="remote_output_w2v2/checkpoint-800", help="Path or HF repo ID to the model checkpoint.")
     parser.add_argument("--processor", type=str, default=None, help="Path or HF repo ID to the processor (defaults to checkpoint).")
     parser.add_argument("--arpa", type=str, default="output_w2v2/lm-cim-4-correct.arpa", help="Path to KenLM ARPA model.")
@@ -248,8 +248,8 @@ def main():
     print("="*50 + "\n")
     
     # Save output to a file
-    results_df.to_csv("test_inference_results.csv", index=False)
-    print("Saved test results to test_inference_results.csv")
+    results_df.to_csv("data/results/test_inference_results.csv", index=False)
+    print("Saved test results to data/results/test_inference_results.csv")
     
     # Display first few comparisons
     print("\nSample Comparisons:")

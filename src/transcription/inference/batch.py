@@ -159,7 +159,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="batch_inference_results.csv",
+        default="data/results/batch_inference_results.csv",
         help="Path to the output CSV file to save results.",
     )
     parser.add_argument(
