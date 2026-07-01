@@ -20,3 +20,15 @@ steps-isolated-cuda-asr.txt
 
 # sub-repos
 colab-script-rips/kenlm/
+
+# audio files and archives
+*.wav
+*.zip
+
+# training outputs
+remote_output_w2v2/
+
+# log files
+run*.txt
+test_inference_results.csv
+
