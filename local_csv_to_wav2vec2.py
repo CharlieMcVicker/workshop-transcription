@@ -12,6 +12,8 @@ import random
 import wave
 import contextlib
 import csv
+from tone_normalize import replace_tones
+
 
 
 def clean_transcription(text):
@@ -137,6 +139,7 @@ def main():
     missing_count = 0
     empty_transcripts = 0
     duration_filtered = 0
+    dropped_tone_count = 0
 
     for row in samples:
         filename = row['audio']
@@ -154,7 +157,12 @@ def main():
 
         # 2. Reformat transcription
         raw_text = row[args.text_col]
-        cleaned_text = clean_transcription(raw_text)
+        norm_text, should_drop = replace_tones(raw_text)
+        if should_drop:
+            dropped_tone_count += 1
+            continue
+            
+        cleaned_text = clean_transcription(norm_text)
         
         if cleaned_text == "":
             empty_transcripts += 1
@@ -172,10 +180,13 @@ def main():
 
     if missing_count > 0:
         print(f"Note: {missing_count} audio files referenced in CSV were not found in '{args.audio_dir}'.")
+    if dropped_tone_count > 0:
+        print(f"Note: {dropped_tone_count} samples dropped due to rare tone/diacritic marks.")
     if empty_transcripts > 0:
         print(f"Note: {empty_transcripts} empty transcripts removed.")
     if duration_filtered > 0:
         print(f"Note: {duration_filtered} samples dropped for exceeding maximum duration of {args.max_duration}s.")
+
 
     # Shuffle the dataset
     print(f"Shuffling dataset with seed {args.seed}...")
