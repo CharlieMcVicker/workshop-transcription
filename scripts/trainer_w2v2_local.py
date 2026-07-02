@@ -332,76 +332,7 @@ def main():
     )
     processor.save_pretrained(folder_model_files)
 
-    # Build KenLM Language Model
-    print("Building KenLM model...")
-    corpus_file = os.path.join(CONFIG["output_dir"], f"{CONFIG['asr_lang']}-corpus.txt")
-    all_sentences = pd.concat(
-        [df_train[text_col], df_valid[text_col], df_test[text_col]]
-    ).tolist()
-    with open(corpus_file, "w", encoding="utf-8") as f:
-        for s in all_sentences:
-            s = s.strip()
-            if s:
-                f.write(s + "\n")
-
-    filename_kenlm = f"lm-{CONFIG['asr_lang']}-{CONFIG['ngrams']}.arpa"
-    filename_correct_kenlm = f"lm-{CONFIG['asr_lang']}-{CONFIG['ngrams']}-correct.arpa"
-    arpa_path = os.path.join(CONFIG["output_dir"], filename_kenlm)
-    correct_arpa_path = os.path.join(CONFIG["output_dir"], filename_correct_kenlm)
-
-    # Ensure lmplz is available
-    lmplz_cmd = CONFIG["lmplz_path"]
-    if not shutil.which(lmplz_cmd) and not os.path.exists(lmplz_cmd):
-        # Check script-relative fallback folder (built by install_requirements.sh)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        local_lmplz = os.path.join(script_dir, "kenlm", "build", "bin", "lmplz")
-        if os.path.exists(local_lmplz):
-            lmplz_cmd = local_lmplz
-        else:
-            print(
-                f"Error: '{lmplz_cmd}' not found on system PATH and no pre-built KenLM found at {local_lmplz}."
-            )
-            print(
-                "Please run 'install_requirements.sh' first to install and compile dependencies."
-            )
-            sys.exit(1)
-
-    # Invoke lmplz
-    try:
-        print(f"Running {lmplz_cmd}...")
-        with open(corpus_file, "r", encoding="utf-8") as infile, open(
-            arpa_path, "w", encoding="utf-8"
-        ) as outfile:
-            subprocess.run(
-                [lmplz_cmd, "-o", str(CONFIG["ngrams"]), "--discount_fallback"],
-                stdin=infile,
-                stdout=outfile,
-                check=True,
-            )
-        print(f"ARPA model built: {arpa_path}")
-    except Exception as e:
-        print(f"Error executing lmplz: {e}")
-        print(
-            "Please ensure KenLM command 'lmplz' is installed and in your PATH, or specify via CONFIG['lmplz_path']"
-        )
-        sys.exit(1)
-
-    # Patch ARPA with </s> to fix pyctcdecode expectations if needed
-    with open(arpa_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    with open(correct_arpa_path, "w", encoding="utf-8") as out:
-        has_added_eos = False
-        for line in lines:
-            if not has_added_eos and "ngram 1=" in line:
-                count = int(line.strip().split("=")[-1])
-                out.write(line.replace(f"ngram 1={count}", f"ngram 1={count+1}"))
-            elif not has_added_eos and "<s>" in line:
-                out.write(line)
-                out.write(line.replace("<s>", "</s>"))
-                has_added_eos = True
-            else:
-                out.write(line)
-    print(f"Corrected ARPA model saved: {correct_arpa_path}")
+    print("Skipping KenLM language model building as requested.")
 
     # Build HuggingFace datasets
     print("Preparing HuggingFace Datasets...")
@@ -553,148 +484,88 @@ def main():
         print("No checkpoints found. Running evaluation on final model.")
         checkpoints = [("final", folder_model_files)]
 
-    vocab_dict_sorted = processor.tokenizer.get_vocab()
-    sorted_vocab = sorted(vocab_dict_sorted.items(), key=lambda kv: kv[1])
-    labels = [t for t, _ in sorted_vocab]
-    labels = ["" if t == "[PAD]" else (" " if t == "|" else t) for t in labels]
-
-    decoder = build_ctcdecoder(
-        labels=labels,
-        kenlm_model_path=correct_arpa_path,
-        alpha=0.5,
-        beta=1.0,
-    )
-    processor_with_lm = Wav2Vec2ProcessorWithLM(
-        feature_extractor=processor.feature_extractor,
-        tokenizer=processor.tokenizer,
-        decoder=decoder,
-    )
-
     def safe(s):
         return s if s.strip() else " "
 
     from torch.utils.data import DataLoader
     from tqdm import tqdm
-    import multiprocessing
-
-    num_cores = os.cpu_count() or 1
-    # On CUDA/NVIDIA machines, using the 'fork' start method after initializing CUDA
-    # (which happens during training) will cause runtime crashes or deadlocks.
-    # Since pyctcdecode is not easily pickleable, we cannot use 'spawn'.
-    # Therefore, we fall back to sequential decoding (pool = None) when CUDA is active.
-    if torch.cuda.is_available():
-        print(
-            "CUDA detected. Using sequential decoding to avoid CUDA multiprocessing fork issues."
-        )
-        pool = None
-    else:
-        try:
-            pool = multiprocessing.get_context("fork").Pool(processes=num_cores)
-        except Exception as e:
-            print(
-                f"Failed to initialize multiprocessing pool with fork: {e}. Falling back to sequential decoding."
-            )
-            pool = None
 
     rows_by_ckpt = {}
-    try:
-        for ckpt_label, ckpt_path in checkpoints:
-            print(f"Evaluating checkpoint: {ckpt_label}")
-            ckpt_model = Wav2Vec2ForCTC.from_pretrained(ckpt_path)
-            ckpt_model.eval()
-            ckpt_model.to(device)
+    for ckpt_label, ckpt_path in checkpoints:
+        print(f"Evaluating checkpoint: {ckpt_label}")
+        ckpt_model = Wav2Vec2ForCTC.from_pretrained(ckpt_path)
+        ckpt_model.eval()
+        ckpt_model.to(device)
 
-            test_loader = DataLoader(
-                test_ds_prepared,
-                batch_size=CONFIG.get("eval_batch_size", 16),
-                collate_fn=data_collator,
-                shuffle=False,
+        test_loader = DataLoader(
+            test_ds_prepared,
+            batch_size=CONFIG.get("eval_batch_size", 16),
+            collate_fn=data_collator,
+            shuffle=False,
+        )
+
+        all_logits = []
+        all_greedy_hypotheses = []
+
+        print("  Running GPU batch inference...")
+        for batch in tqdm(test_loader, desc=f"Inference ({ckpt_label})"):
+            input_values = batch["input_values"].to(device)
+            attention_mask = (
+                batch["attention_mask"].to(device)
+                if "attention_mask" in batch
+                else None
             )
 
-            all_logits = []
-            all_greedy_hypotheses = []
-
-            print("  Running GPU batch inference...")
-            for batch in tqdm(test_loader, desc=f"Inference ({ckpt_label})"):
-                input_values = batch["input_values"].to(device)
-                attention_mask = (
-                    batch["attention_mask"].to(device)
-                    if "attention_mask" in batch
-                    else None
+            with torch.no_grad():
+                outputs = ckpt_model(
+                    input_values=input_values, attention_mask=attention_mask
                 )
+                logits = outputs.logits
 
-                with torch.no_grad():
-                    outputs = ckpt_model(
-                        input_values=input_values, attention_mask=attention_mask
-                    )
-                    logits = outputs.logits
-
-                if attention_mask is not None:
-                    input_lengths = attention_mask.sum(dim=-1)
-                    output_lengths = ckpt_model._get_feat_extract_output_lengths(
-                        input_lengths
-                    )
-                    output_lengths = output_lengths.cpu().numpy()
-                else:
-                    output_lengths = [logits.shape[1]] * logits.shape[0]
-
-                logits_np = logits.cpu().numpy()
-                for i in range(len(logits_np)):
-                    actual_len = int(output_lengths[i])
-                    sliced = logits_np[i, :actual_len, :]
-                    all_logits.append(sliced)
-
-                    pred_ids = np.argmax(sliced, axis=-1)
-                    hyp_greedy = processor.decode(pred_ids).strip()
-                    all_greedy_hypotheses.append(hyp_greedy)
-
-            all_gold_sentences = [ex["sentence"] for ex in test_ds_prepared]
-            all_lm_hypotheses = []
-            chunk_size = 64
-            num_logits = len(all_logits)
-
-            print("  Running multiprocess KenLM decoding...")
-            with tqdm(total=num_logits, desc=f"Decoding ({ckpt_label})") as pbar:
-                for start_idx in range(0, num_logits, chunk_size):
-                    end_idx = min(start_idx + chunk_size, num_logits)
-                    logits_chunk = all_logits[start_idx:end_idx]
-                    decoded_texts = processor_with_lm.decoder.decode_batch(
-                        pool, logits_chunk
-                    )
-                    for text in decoded_texts:
-                        all_lm_hypotheses.append(text.strip())
-                    pbar.update(end_idx - start_idx)
-
-            ckpt_rows = []
-            for idx in range(num_logits):
-                reference = all_gold_sentences[idx]
-                hyp_greedy = all_greedy_hypotheses[idx]
-                hyp_lm = all_lm_hypotheses[idx]
-
-                ref_m = safe(reference)
-                ckpt_rows.append(
-                    {
-                        "checkpoint": ckpt_label,
-                        "index": idx,
-                        "gold": reference,
-                        "hyp_greedy": hyp_greedy,
-                        "hyp_kenlm": hyp_lm,
-                        "wer_greedy": jiwer_wer(ref_m, safe(hyp_greedy)),
-                        "cer_greedy": jiwer_cer(ref_m, safe(hyp_greedy)),
-                        "wer_kenlm": jiwer_wer(ref_m, safe(hyp_lm)),
-                        "cer_kenlm": jiwer_cer(ref_m, safe(hyp_lm)),
-                    }
+            if attention_mask is not None:
+                input_lengths = attention_mask.sum(dim=-1)
+                output_lengths = ckpt_model._get_feat_extract_output_lengths(
+                    input_lengths
                 )
-            rows_by_ckpt[ckpt_label] = ckpt_rows
-            del ckpt_model
-            if device == "cuda":
-                torch.cuda.empty_cache()
-            elif device == "mps":
-                torch.mps.empty_cache()
-    finally:
-        if pool is not None:
-            pool.close()
-            pool.join()
+                output_lengths = output_lengths.cpu().numpy()
+            else:
+                output_lengths = [logits.shape[1]] * logits.shape[0]
+
+            logits_np = logits.cpu().numpy()
+            for i in range(len(logits_np)):
+                actual_len = int(output_lengths[i])
+                sliced = logits_np[i, :actual_len, :]
+                all_logits.append(sliced)
+
+                pred_ids = np.argmax(sliced, axis=-1)
+                hyp_greedy = processor.decode(pred_ids).strip()
+                all_greedy_hypotheses.append(hyp_greedy)
+
+        all_gold_sentences = [ex["sentence"] for ex in test_ds_prepared]
+        num_logits = len(all_logits)
+
+        ckpt_rows = []
+        for idx in range(num_logits):
+            reference = all_gold_sentences[idx]
+            hyp_greedy = all_greedy_hypotheses[idx]
+
+            ref_m = safe(reference)
+            ckpt_rows.append(
+                {
+                    "checkpoint": ckpt_label,
+                    "index": idx,
+                    "gold": reference,
+                    "hyp_greedy": hyp_greedy,
+                    "wer_greedy": jiwer_wer(ref_m, safe(hyp_greedy)),
+                    "cer_greedy": jiwer_cer(ref_m, safe(hyp_greedy)),
+                }
+            )
+        rows_by_ckpt[ckpt_label] = ckpt_rows
+        del ckpt_model
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        elif device == "mps":
+            torch.mps.empty_cache()
 
     ranking = []
     for ckpt_label, rows in rows_by_ckpt.items():
@@ -702,10 +573,10 @@ def main():
         ranking.append(
             {
                 "checkpoint": ckpt_label,
-                "median_wer_kenlm": float(np.median(df["wer_kenlm"])),
-                "median_cer_kenlm": float(np.median(df["cer_kenlm"])),
-                "agg_wer_kenlm": jiwer_wer(list(df["gold"]), list(df["hyp_kenlm"])),
-                "agg_cer_kenlm": jiwer_cer(list(df["gold"]), list(df["hyp_kenlm"])),
+                "median_wer_greedy": float(np.median(df["wer_greedy"])),
+                "median_cer_greedy": float(np.median(df["cer_greedy"])),
+                "agg_wer_greedy": jiwer_wer(list(df["gold"]), list(df["hyp_greedy"])),
+                "agg_cer_greedy": jiwer_cer(list(df["gold"]), list(df["hyp_greedy"])),
             }
         )
 
@@ -713,10 +584,10 @@ def main():
         pd.DataFrame(ranking)
         .sort_values(
             by=[
-                "median_wer_kenlm",
-                "median_cer_kenlm",
-                "agg_wer_kenlm",
-                "agg_cer_kenlm",
+                "median_wer_greedy",
+                "median_cer_greedy",
+                "agg_wer_greedy",
+                "agg_cer_greedy",
             ],
             ascending=True,
         )

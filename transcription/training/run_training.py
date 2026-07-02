@@ -138,41 +138,7 @@ def main():
     )
     processor.save_pretrained(model_dir)
     
-    all_sentences = pd.concat([df_train["sentence"], df_valid["sentence"], df_test["sentence"]]).tolist()
-    with open(corpus_file, "w", encoding="utf-8") as f:
-        for s in all_sentences:
-            s = s.strip()
-            if s:
-                f.write(s + "\n")
-                
-    # KenLM (Skip if lmplz not found)
-    arpa_path = os.path.join(model_dir, f"lm-{args.lang_prefix}-{args.ngrams}.arpa")
-    correct_arpa_path = os.path.join(model_dir, f"lm-{args.lang_prefix}-{args.ngrams}-correct.arpa")
-    lmplz_path = args.lmplz_path or shutil.which("lmplz")
-    if lmplz_path:
-        try:
-            print(f"Building KenLM model using {lmplz_path}...")
-            subprocess.run(f'"{lmplz_path}" -o {args.ngrams} --discount_fallback < "{corpus_file}" > "{arpa_path}"', shell=True, check=True)
-            # Fix ARPA
-            with open(arpa_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            with open(correct_arpa_path, "w", encoding="utf-8") as out:
-                has_added_eos = False
-                for line in lines:
-                    if not has_added_eos and "ngram 1=" in line:
-                        count = int(line.strip().split("=")[-1])
-                        out.write(line.replace(f"ngram 1={count}", f"ngram 1={count+1}"))
-                    elif not has_added_eos and "<s>" in line:
-                        out.write(line)
-                        out.write(line.replace("<s>", "</s>"))
-                        has_added_eos = True
-                    else:
-                        out.write(line)
-            print("KenLM ARPA built successfully.")
-        except Exception as e:
-            print(f"Failed to build KenLM: {e}")
-    else:
-        print("lmplz not found in PATH. Skipping KenLM build.")
+    print("Skipping KenLM language model building as requested.")
 
     def df_to_ds(df):
         ds = Dataset.from_pandas(df[["path", "sentence"]].reset_index(drop=True).rename(columns={"path": "audio"}))

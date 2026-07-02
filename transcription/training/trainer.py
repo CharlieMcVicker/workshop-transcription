@@ -456,9 +456,7 @@ os.makedirs(folderModelFiles, exist_ok=True)
 processor.save_pretrained(folderModelFiles)
 
 
-all_sentences = pd.concat(
-    [df_train[text_col], df_valid[text_col], df_test[text_col]]
-).tolist()
+all_sentences = df_train[text_col].tolist()
 
 with open(corpusFile, "w", encoding="utf-8") as f:
     for s in all_sentences:
@@ -467,14 +465,7 @@ with open(corpusFile, "w", encoding="utf-8") as f:
             f.write(s + "\n")
 print("Wrote corpus:", corpusFile, "| lines:", len(all_sentences))
 
-arpa_path = os.path.join("/content", filenameKenlmModel)
-
-# Estimate the ARPA model. --discount_fallback helps with tiny corpora.
-!{KENLM_BIN}/lmplz -o {ngrams} --discount_fallback \
-    < "{corpusFile}" > "{arpa_path}"
-
-assert os.path.exists(arpa_path), "lmplz did not produce an ARPA file."
-print("ARPA model:", arpa_path)
+print("Skipping KenLM language model building as requested.")
 
 from datasets import Dataset, Audio
 
