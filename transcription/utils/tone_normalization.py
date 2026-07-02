@@ -142,6 +142,66 @@ def replace_tones(text):
     return " ".join(new_words), False
 
 
+def remove_tones_and_double_vowels(text):
+    """
+    Normalizes Cherokee text:
+    1. Unicode NFD normalization.
+    2. Respell consonants.
+    3. For vowels (aeiouvAEIOUV):
+       - If followed by a colon (':' or 'ː'), double the vowel and remove the colon and all combining diacritics.
+       - If not followed by a colon, keep the vowel single and remove all combining diacritics.
+    """
+    if not isinstance(text, str):
+        return "", False
+
+    nfd_text = unicodedata.normalize("NFD", text)
+
+    # Check for dropped marks
+    for mark in DROPPED_MARKS:
+        if mark in nfd_text:
+            return None, True
+
+    # Respell consonants
+    text_normaled_all = respell_consonants(nfd_text)
+    words = text_normaled_all.split(" ")
+    new_words = []
+
+    for word in words:
+        new_word = []
+        i = 0
+        n = len(word)
+        while i < n:
+            char = word[i]
+            if char in VOWELS:
+                # Scan for following diacritics/colons
+                j = i + 1
+                seq = []
+                while j < n:
+                    next_char = word[j]
+                    is_combining = unicodedata.category(next_char).startswith("M")
+                    if is_combining or next_char in [":", "ː"]:
+                        seq.append(next_char)
+                        j += 1
+                    else:
+                        break
+
+                seq_str = "".join(seq)
+                if ":" in seq_str or "ː" in seq_str:
+                    new_word.append(char * 2)
+                else:
+                    new_word.append(char)
+                i = j
+            else:
+                new_word.append(char)
+                i += 1
+        new_words.append("".join(new_word))
+
+    return " ".join(new_words), False
+
+
+
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python tone_normalize.py <input_csv> <output_csv> [text_column]")

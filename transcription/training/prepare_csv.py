@@ -12,7 +12,7 @@ import random
 import wave
 import contextlib
 import csv
-from transcription.utils.tone_normalization import replace_tones
+from transcription.utils.tone_normalization import remove_tones_and_double_vowels
 
 
 
@@ -157,7 +157,9 @@ def main():
 
         # 2. Reformat transcription
         raw_text = row[args.text_col]
-        norm_text, should_drop = replace_tones(raw_text)
+        if isinstance(raw_text, str):
+            raw_text = raw_text.replace("*", "")
+        norm_text, should_drop = remove_tones_and_double_vowels(raw_text)
         if should_drop:
             dropped_tone_count += 1
             continue

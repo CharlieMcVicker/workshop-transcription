@@ -242,13 +242,20 @@ def main():
     CONFIG["max_steps"] = args.max_steps
     CONFIG["push_to_hub"] = args.push_to_hub
     CONFIG["hub_model_id"] = args.hub_model_id
-    CONFIG["hub_token"] = args.hub_token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    CONFIG["hub_token"] = (
+        args.hub_token
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    )
 
     if CONFIG["push_to_hub"]:
         import datetime
+
         run_start_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        prefix = f"with-final-tone-{run_start_time}"
-        base_name = CONFIG["hub_model_id"] if CONFIG["hub_model_id"] else "wav2vec2-large-xlsr"
+        prefix = f"length-only-{run_start_time}"
+        base_name = (
+            CONFIG["hub_model_id"] if CONFIG["hub_model_id"] else "wav2vec2-large-xlsr"
+        )
         if "/" in base_name:
             parts = base_name.split("/")
             if len(parts) == 2:
