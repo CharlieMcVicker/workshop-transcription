@@ -117,7 +117,14 @@ def decode_worker(item_data):
     }
 
 
+from transcription.utils.model_utils import get_best_model_config
+
+
 def main():
+    model_config = get_best_model_config()
+    default_repo = model_config["repo"]
+    default_revision = model_config["revision"]
+
     parser = argparse.ArgumentParser(
         description="Run Wav2Vec2 ASR batch inference on a directory of audio files."
     )
@@ -129,13 +136,13 @@ def main():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="charliemcvicker/asr-cherokee",
+        default=default_repo,
         help="Path to model checkpoint or Hugging Face Hub repo ID.",
     )
     parser.add_argument(
         "--processor",
         type=str,
-        default="charliemcvicker/asr-cherokee",
+        default=default_repo,
         help="Path to saved processor or Hugging Face Hub repo ID.",
     )
     parser.add_argument(
@@ -153,7 +160,7 @@ def main():
     parser.add_argument(
         "--revision",
         type=str,
-        default="5464d15",
+        default=default_revision,
         help="Specific Hugging Face Hub commit hash, branch, or tag.",
     )
     parser.add_argument(

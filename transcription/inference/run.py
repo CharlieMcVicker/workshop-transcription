@@ -11,10 +11,14 @@ import warnings
 warnings.filterwarnings("ignore")
 
 def parse_args():
+    from transcription.utils.model_utils import get_best_model_config
+    model_config = get_best_model_config()
+    default_repo = model_config["repo"]
+
     parser = argparse.ArgumentParser(description="Run Inference on Audio")
     parser.add_argument("--mode", choices=["short", "long"], required=True)
     parser.add_argument("--audio_file", required=True)
-    parser.add_argument("--model_dir", required=True)
+    parser.add_argument("--model_dir", default=default_repo, help="Path to model directory or Hugging Face repo ID.")
     parser.add_argument("--output_tsv", type=str, default="")
     return parser.parse_args()
 
@@ -26,7 +30,7 @@ def convert_to_human_orthography(input_string):
         output_string = output_string.replace(o, t)
     return output_string
 
-def get_processor_with_lm(processor, model_dir):
+def get_processor_with_lm(processor, model_dir, revision=None):
     try:
         from pyctcdecode import build_ctcdecoder
         arpa_files = glob.glob(os.path.join(model_dir, "*-correct.arpa"))
@@ -57,10 +61,18 @@ def main():
     print(f"Using device: {device}")
     
     print("Loading model and processor...")
-    model = Wav2Vec2ForCTC.from_pretrained(args.model_dir).to(device)
+    from transcription.utils.model_utils import get_best_model_config
+    model_config = get_best_model_config()
+    
+    revision = None
+    if args.model_dir == model_config["repo"]:
+        revision = model_config["revision"]
+        print(f"Using model configuration from best_model.json: {args.model_dir} (revision: {revision})")
+
+    model = Wav2Vec2ForCTC.from_pretrained(args.model_dir, revision=revision).to(device)
     model.eval()
-    processor = Wav2Vec2Processor.from_pretrained(args.model_dir)
-    processor_lm = get_processor_with_lm(processor, args.model_dir)
+    processor = Wav2Vec2Processor.from_pretrained(args.model_dir, revision=revision)
+    processor_lm = get_processor_with_lm(processor, args.model_dir, revision=revision)
     
     print(f"Loading audio: {args.audio_file}")
     speech, sr = librosa.load(args.audio_file, sr=16000)

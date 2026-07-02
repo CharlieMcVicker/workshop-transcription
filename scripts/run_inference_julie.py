@@ -27,10 +27,16 @@ try:
 except ImportError:
     HAS_PYCTCDECODE = False
 
+from transcription.utils.model_utils import get_best_model_config
+
 TARGET_SAMPLE_RATE = 16000
 
 
 def main():
+    model_config = get_best_model_config()
+    default_repo = model_config["repo"]
+    default_revision = model_config["revision"]
+
     parser = argparse.ArgumentParser(
         description="Run Wav2Vec2 ASR inference on a single audio file."
     )
@@ -42,13 +48,13 @@ def main():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="charliemcvicker/asr-cherokee",
+        default=default_repo,
         help="Path to model checkpoint or Hugging Face Hub repo ID.",
     )
     parser.add_argument(
         "--processor",
         type=str,
-        default="charliemcvicker/asr-cherokee",
+        default=default_repo,
         help="Path to saved processor or Hugging Face Hub repo ID.",
     )
     parser.add_argument(
@@ -66,7 +72,7 @@ def main():
     parser.add_argument(
         "--revision",
         type=str,
-        default=None,
+        default=default_revision,
         help="Specific Hugging Face Hub commit hash, branch, or tag.",
     )
     args = parser.parse_args()
