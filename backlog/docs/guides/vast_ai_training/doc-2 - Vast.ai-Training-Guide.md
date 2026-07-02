@@ -61,13 +61,13 @@ Before copying the dataset, ensure the relative paths in your local folder match
 Run the following command from your local machine (within this project root):
 
 ```bash
-# Transfer the CSV splits, audio files, and training scripts to the vast.ai workspace
+# Transfer the CSV splits, audio files, and training module to the vast.ai workspace
 scp -P [PORT] -r \
   cim-wav2vec2-train.csv \
   cim-wav2vec2-valid.csv \
   cim-wav2vec2-test.csv \
   sentence_audio/ \
-  colab-script-rips/trainer_w2v2_local.py \
+  transcription/ \
   root@[IP]:/workspace/
 ```
 
@@ -112,7 +112,7 @@ Before renting a high-end GPU (like an RTX 4090 or A6000) for a full run:
    Run the training script with the `--max-steps` argument set to `10`. This compiles the graphs, loads the dataset, performs forward/backward passes, calculates CTC loss, and completes a checkpoint write to verify the entire pipeline runs without memory/driver errors:
 
    ```bash
-   python3 /workspace/trainer_w2v2_local.py \
+   python3 -m transcription.training.train \
      --train-csv /workspace/cim-wav2vec2-train.csv \
      --valid-csv /workspace/cim-wav2vec2-valid.csv \
      --test-csv /workspace/cim-wav2vec2-test.csv \
@@ -130,7 +130,7 @@ Before renting a high-end GPU (like an RTX 4090 or A6000) for a full run:
 To run the training on your high-performance GPU instance and automatically push saving checkpoints to Hugging Face Hub (as a free private repository backup):
 
 ```bash
-python3 /workspace/trainer_w2v2_local.py \
+python3 -m transcription.training.train \
   --train-csv /workspace/cim-wav2vec2-train.csv \
   --valid-csv /workspace/cim-wav2vec2-valid.csv \
   --test-csv /workspace/cim-wav2vec2-test.csv \
